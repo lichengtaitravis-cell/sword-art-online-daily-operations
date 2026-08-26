@@ -1,0 +1,46 @@
+:root {
+  color-scheme:light;
+
+  /* Core identity */
+  --color-signal:#f7e21b;
+  --color-signal-hot:#ffef54;
+  --color-signal-deep:#d9bd00;
+  --color-ink:#11120f;
+  --color-paper:#fffdf2;
+  --color-white:#fff;
+
+  /* Supporting broadcast accents */
+  --color-orange:#ef8c22;
+  --color-green:#58a849;
+  --color-red:#ec4337;
+  --color-blue:#2f7ce0;
+  --color-violet:#7d4bd6;
+
+  /* Neutral hierarchy */
+  --color-charcoal:#272821;
+  --color-muted:#6b695f;
+  --color-line:#d4cfb5;
+
+  /* Typography */
+  --font-display:'Arial Black','Avenir Next Condensed','Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
+  --font-ui:'Avenir Next Condensed','Arial Narrow','Roboto Condensed','Helvetica Neue','PingFang SC','Noto Sans SC',sans-serif;
+  --font-body:Arial,'Noto Sans SC','PingFang SC',sans-serif;
+
+  /* Shape and elevation */
+  --line-thin:2px;
+  --line-medium:3px;
+  --line-heavy:5px;
+  --shadow-pop:6px 6px 0 var(--color-ink);
+  --shadow-loud:10px 10px 0 var(--color-ink);
+  --angle-soft:-2deg;
+  --angle-loud:-6deg;
+  --cut-soft:polygon(2% 0,100% 0,97% 100%,0 100%);
+  --cut-loud:polygon(7% 0,100% 4%,93% 100%,0 94%);
+
+  /* Motion */
+  --duration-snap:120ms;
+  --duration-ui:180ms;
+  --duration-enter:360ms;
+  --ease-snap:cubic-bezier(.2,.9,.25,1);
+  --ease-pop:cubic-bezier(.16,1.35,.35,1);
+}

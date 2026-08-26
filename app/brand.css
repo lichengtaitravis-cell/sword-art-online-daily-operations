@@ -1,0 +1,328 @@
+/*
+ * Sword Art Online identity lockup.
+ * P4G-inspired broadcast energy, built as original CSS/HTML—not a traced game logo.
+ */
+
+.brand-lockup {
+  position:relative;
+  z-index:1;
+  width:448px;
+  min-width:448px;
+  align-self:center;
+  isolation:isolate;
+  transform:rotate(-1deg);
+}
+
+.brand-lockup::before {
+  content:'';
+  position:absolute;
+  z-index:-2;
+  left:32px;
+  top:27px;
+  width:386px;
+  height:108px;
+  opacity:.16;
+  background:
+    linear-gradient(45deg,var(--color-ink) 25%,transparent 25%) 0 0/12px 12px,
+    linear-gradient(45deg,transparent 75%,var(--color-ink) 75%) 0 0/12px 12px,
+    linear-gradient(45deg,transparent 75%,var(--color-ink) 75%) 6px -6px/12px 12px,
+    linear-gradient(45deg,var(--color-ink) 25%,transparent 25%) 6px 6px/12px 12px;
+  clip-path:var(--cut-loud);
+  transform:rotate(2deg);
+}
+
+.brand-lockup::after {
+  content:'';
+  position:absolute;
+  z-index:-1;
+  left:58px;
+  top:117px;
+  width:360px;
+  height:17px;
+  display:block;
+  border:3px solid var(--color-ink);
+  background:linear-gradient(90deg,var(--color-orange) 0 27%,var(--color-paper) 27% 43%,var(--color-green) 43% 69%,var(--color-signal) 69%);
+  box-shadow:4px 4px 0 var(--color-ink);
+  transform:skew(-18deg) rotate(-2deg);
+}
+
+.brand-kicker {
+  position:relative;
+  z-index:8;
+  display:inline-flex;
+  align-items:center;
+  margin:0 0 0 82px;
+  padding:0;
+  color:var(--color-paper);
+  background:var(--color-ink);
+  border:3px solid var(--color-ink);
+  font-family:var(--font-ui);
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.15em;
+  line-height:1;
+  transform:skew(-9deg) rotate(-1deg);
+}
+
+.brand-kicker span,
+.brand-kicker b {
+  display:block;
+  padding:5px 9px;
+}
+
+.brand-kicker b {
+  color:var(--color-ink);
+  background:var(--color-signal);
+  font-weight:1000;
+}
+
+.brand-lockup h1 {
+  position:relative;
+  width:448px;
+  height:112px;
+  margin:0;
+  overflow:visible;
+  font-family:var(--font-display);
+  font-style:normal;
+  line-height:1;
+  letter-spacing:0;
+  transform:none;
+}
+
+.brand-lockup h1 span,
+.brand-lockup h1 strong {
+  position:absolute;
+  display:block;
+  margin:0;
+  box-sizing:border-box;
+  font-family:var(--font-display);
+  font-style:italic;
+  font-weight:1000;
+  line-height:.82;
+  text-shadow:none;
+  -webkit-text-stroke:0;
+  filter:none;
+}
+
+.brand-lockup h1 .brand-signal {
+  z-index:7;
+  left:2px;
+  top:2px;
+  width:105px;
+  height:91px;
+  display:grid;
+  place-items:center;
+  color:var(--color-paper);
+  background:
+    repeating-linear-gradient(0deg,transparent 0 4px,rgba(255,255,255,.08) 4px 5px),
+    var(--color-ink);
+  border:4px solid var(--color-paper);
+  outline:4px solid var(--color-ink);
+  box-shadow:7px 7px 0 var(--color-orange),11px 11px 0 var(--color-ink);
+  clip-path:polygon(9% 0,100% 5%,94% 91%,14% 100%,0 78%,3% 11%);
+  transform:rotate(-4deg);
+  animation:brandSignalIn var(--duration-enter) var(--ease-pop) both;
+}
+
+.brand-signal b {
+  font-size:32px;
+  letter-spacing:-.11em;
+  transform:skew(-8deg);
+}
+
+.brand-signal i {
+  position:absolute;
+  right:7px;
+  bottom:7px;
+  display:grid;
+  place-items:center;
+  width:29px;
+  height:29px;
+  color:var(--color-ink);
+  background:var(--color-signal);
+  border:3px solid var(--color-paper);
+  border-radius:50%;
+  font-family:var(--font-ui);
+  font-size:10px;
+  font-style:normal;
+  font-weight:1000;
+}
+
+.brand-lockup h1 .logo-sword,
+.brand-lockup h1 .logo-art {
+  z-index:4;
+  top:10px;
+  height:54px;
+  padding:9px 13px 5px;
+  color:var(--color-ink);
+  background:var(--color-paper);
+  border:5px solid var(--color-ink);
+  box-shadow:5px 6px 0 var(--color-signal);
+  font-size:45px;
+  letter-spacing:-.095em;
+  white-space:nowrap;
+  transform:skew(-8deg) rotate(-2deg);
+  animation:brandWordIn var(--duration-enter) var(--ease-pop) 70ms both;
+}
+
+.brand-lockup h1 .logo-sword {
+  left:88px;
+  width:246px;
+  clip-path:polygon(3% 0,100% 5%,94% 100%,0 91%);
+}
+
+.brand-lockup h1 .logo-art {
+  z-index:5;
+  left:318px;
+  top:15px;
+  width:124px;
+  color:var(--color-paper);
+  background:var(--color-orange);
+  box-shadow:5px 6px 0 var(--color-green);
+  clip-path:polygon(8% 4%,100% 0,94% 92%,0 100%);
+  transform:skew(-7deg) rotate(3deg);
+  animation-delay:110ms;
+}
+
+.brand-lockup h1 strong {
+  z-index:6;
+  left:113px;
+  top:66px;
+  width:291px;
+  height:45px;
+  padding:7px 17px 4px;
+  color:var(--color-signal);
+  background:var(--color-ink);
+  border:4px solid var(--color-paper);
+  outline:4px solid var(--color-ink);
+  box-shadow:8px 8px 0 var(--color-green);
+  clip-path:polygon(4% 0,100% 4%,95% 100%,0 91%);
+  font-size:31px;
+  letter-spacing:.16em;
+  text-align:center;
+  transform:skew(-9deg) rotate(-1deg);
+  animation:brandWordIn var(--duration-enter) var(--ease-pop) 150ms both;
+}
+
+.brand-lockup h1 .brand-burst {
+  z-index:9;
+  right:-2px;
+  top:73px;
+  display:grid;
+  place-items:center;
+  width:41px;
+  height:41px;
+  color:var(--color-ink);
+  background:var(--color-signal);
+  border:4px solid var(--color-ink);
+  border-radius:50%;
+  box-shadow:3px 3px 0 var(--color-paper);
+  font-size:23px;
+  transform:rotate(9deg);
+  animation:brandSignalIn var(--duration-enter) var(--ease-pop) 220ms both;
+}
+
+.brand-channel {
+  position:relative;
+  z-index:8;
+  display:flex;
+  align-items:center;
+  width:max-content;
+  margin:-1px 0 0 87px;
+  color:var(--color-paper);
+  background:var(--color-ink);
+  border:2px solid var(--color-ink);
+  font-family:var(--font-ui);
+  font-size:9px;
+  font-weight:1000;
+  letter-spacing:.13em;
+  transform:skew(-8deg) rotate(1deg);
+}
+
+.brand-channel span,
+.brand-channel b,
+.brand-channel i {
+  display:block;
+  padding:4px 8px;
+}
+
+.brand-channel i {
+  color:var(--color-ink);
+  background:var(--color-paper);
+  font-style:normal;
+  letter-spacing:-.05em;
+}
+
+.brand-channel b {
+  color:var(--color-ink);
+  background:var(--color-green);
+}
+
+.brand-lockup p {
+  position:relative;
+  z-index:8;
+  margin:8px 0 0 88px;
+  color:var(--color-ink);
+  font-family:var(--font-ui);
+  font-size:10px;
+  font-weight:1000;
+  letter-spacing:.16em;
+}
+
+.theme-night .brand-lockup::before {
+  opacity:.08;
+  filter:invert(1);
+}
+
+.theme-night .brand-lockup p {
+  color:var(--night-text,var(--color-paper));
+}
+
+.theme-night .brand-lockup h1 .brand-signal,
+.theme-night .brand-lockup h1 .logo-art {
+  color:var(--color-paper);
+}
+
+.theme-night .brand-lockup h1 .logo-sword,
+.theme-night .brand-lockup h1 .brand-burst {
+  color:var(--color-ink);
+}
+
+@keyframes brandSignalIn {
+  from { opacity:0; transform:scale(.72) rotate(-12deg); }
+}
+
+@keyframes brandWordIn {
+  from { opacity:0; transform:translateX(-28px) skew(-13deg) rotate(-5deg); }
+}
+
+@media (max-width:760px) {
+  .hero {
+    display:block;
+    min-height:218px;
+    padding:10px 0 0 61px;
+  }
+
+  .brand-lockup {
+    width:448px;
+    min-width:0;
+    transform:scale(.63) rotate(-1deg);
+    transform-origin:left center;
+  }
+
+  .hero .add-task {
+    position:absolute;
+    right:2px;
+    bottom:16px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .brand-lockup h1 .brand-signal,
+  .brand-lockup h1 .logo-sword,
+  .brand-lockup h1 .logo-art,
+  .brand-lockup h1 strong,
+  .brand-lockup h1 .brand-burst {
+    animation:none;
+  }
+}
