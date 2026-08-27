@@ -11,7 +11,8 @@ type View = 'board' | 'table' | 'calendar' | 'settings';
 type ChoiceFieldName = 'status' | 'priority' | 'taskType' | 'location' | 'recurrence';
 type DateFieldName = 'startedAt' | 'completedAt' | 'dueAt';
 type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
-type StartUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinute' | 'finalTen' | 'overdue';
+type CountdownUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinute' | 'finalTen' | 'overdue';
+type CountdownKind = 'start' | 'deadline';
 type ArchiveFilterOption = { value: string; label: string; tone?: string };
 type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'in-progress' | 'completed';
 type DayScheduleBlock = { id: string; task: Task; startMinute: number; endMinute: number; labelStartMinute: number; labelEndMinute: number; lane: number; laneCount: number; offline: boolean; variant: ScheduleVariant; continuesBefore: boolean; continuesAfter: boolean; terminal: boolean };
@@ -36,6 +37,20 @@ type Task = {
   manualOrder: number | null;
 };
 
+type CountdownSignal = { task: Task; kind: CountdownKind; urgency: CountdownUrgency; targetAt: string };
+
+type DialogSessionState = {
+  menuOpen: boolean;
+  dayAgendaOpen: boolean;
+  selectedDay: string;
+  draft: Task | null;
+  choiceField: ChoiceFieldName | null;
+  dateField: DateFieldName | null;
+  pickerDate: string;
+  pickerTime: string;
+  pickerMonth: string;
+};
+
 type PlannerSettings = {
   username: string;
   taskTypes: { value: string; color: TypeColor; custom?: boolean }[];
@@ -58,6 +73,7 @@ const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
 const SETTINGS_KEY = 'sao-planner-settings-v1';
 const THEME_KEY = 'sao-planner-theme-v1';
 const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
+const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
 const VISIBLE_LIMIT: Record<Status, number> = { pending: 5, inProgress: 5, completed: 5 };
 const STATUS_ORDER: Record<Status, number> = { inProgress: 0, pending: 1, completed: 2 };
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -384,9 +400,12 @@ function layoutDaySchedule(tasks: Task[], dayKey: string, referenceNow = new Dat
   return laidOut;
 }
 
-function startUrgency(task: Task, now: Date): StartUrgency | null {
-  if (task.status !== 'pending' || !task.startedAt) return null;
-  const remaining = +new Date(task.startedAt) - +now;
+const COUNTDOWN_URGENCY_RANK: Record<CountdownUrgency, number> = { oneHour: 1, halfHour: 2, fifteen: 3, five: 4, finalMinute: 5, finalTen: 6, overdue: 7 };
+
+function countdownUrgency(targetAt: string, now: Date): CountdownUrgency | null {
+  const target = +new Date(targetAt);
+  if (!targetAt || Number.isNaN(target)) return null;
+  const remaining = target - +now;
   if (remaining <= 0) return 'overdue';
   if (remaining <= 10_000) return 'finalTen';
   if (remaining <= 60_000) return 'finalMinute';
@@ -397,8 +416,8 @@ function startUrgency(task: Task, now: Date): StartUrgency | null {
   return null;
 }
 
-function countdownText(task: Task, now: Date) {
-  const difference = +new Date(task.startedAt) - +now;
+function countdownText(targetAt: string, now: Date) {
+  const difference = +new Date(targetAt) - +now;
   const absoluteSeconds = Math.max(0, Math.floor(Math.abs(difference) / 1000));
   const hours = Math.floor(absoluteSeconds / 3600);
   const minutes = Math.floor((absoluteSeconds % 3600) / 60);
@@ -407,15 +426,58 @@ function countdownText(task: Task, now: Date) {
   return difference <= 0 ? `+${clock}` : `T−${clock}`;
 }
 
-function startUrgencyLabel(urgency: StartUrgency) {
-  if (urgency === 'overdue') return 'START WINDOW BREACHED / 立即开始';
-  if (urgency === 'finalTen') return 'DANGER · 最后十秒';
-  if (urgency === 'finalMinute') return 'FINAL MINUTE / 最后一分钟';
-  if (urgency === 'five') return '5 MIN ALERT / 五分钟提醒';
-  if (urgency === 'fifteen') return '15 MIN ALERT / 十五分钟提醒';
-  if (urgency === 'halfHour') return '30 MIN ALERT / 半小时提醒';
-  if (urgency === 'oneHour') return '1 HOUR ALERT / 一小时提醒';
-  return '1 HOUR ALERT / 一小时提醒';
+function countdownSignals(task: Task, now: Date): CountdownSignal[] {
+  const signals: CountdownSignal[] = [];
+  if (task.status === 'pending' && task.startedAt) {
+    const urgency = countdownUrgency(task.startedAt, now);
+    if (urgency) signals.push({ task, kind: 'start', urgency, targetAt: task.startedAt });
+  }
+  if ((task.status === 'pending' || task.status === 'inProgress') && task.dueAt) {
+    const urgency = countdownUrgency(task.dueAt, now);
+    if (urgency) signals.push({ task, kind: 'deadline', urgency, targetAt: task.dueAt });
+  }
+  return signals;
+}
+
+function compareCountdownSignals(a: CountdownSignal, b: CountdownSignal) {
+  const urgencyDifference = COUNTDOWN_URGENCY_RANK[b.urgency] - COUNTDOWN_URGENCY_RANK[a.urgency];
+  if (urgencyDifference) return urgencyDifference;
+  if (a.kind !== b.kind) return a.kind === 'deadline' ? -1 : 1;
+  return +new Date(a.targetAt) - +new Date(b.targetAt);
+}
+
+function countdownSignalLabel(signal: CountdownSignal) {
+  if (signal.kind === 'deadline') {
+    if (signal.urgency === 'overdue') return 'DEADLINE BREACHED / 已越过截止线';
+    if (signal.urgency === 'finalTen') return 'TABOO · 最后十秒';
+    if (signal.urgency === 'finalMinute') return 'FORBIDDEN MINUTE / 禁忌一分钟';
+    if (signal.urgency === 'five') return 'LOCKDOWN 5 / 截止五分钟';
+    if (signal.urgency === 'fifteen') return 'DEADLINE 15 / 截止十五分钟';
+    if (signal.urgency === 'halfHour') return 'DEADLINE 30 / 截止半小时';
+    return 'DEADLINE 60 / 截止一小时';
+  }
+  if (signal.urgency === 'overdue') return 'START WINDOW BREACHED / 立即开始';
+  if (signal.urgency === 'finalTen') return 'DANGER · 最后十秒';
+  if (signal.urgency === 'finalMinute') return 'FINAL MINUTE / 最后一分钟';
+  if (signal.urgency === 'five') return 'START 5 / 五分钟后开始';
+  if (signal.urgency === 'fifteen') return 'START 15 / 十五分钟后开始';
+  if (signal.urgency === 'halfHour') return 'START 30 / 半小时后开始';
+  return 'START 60 / 一小时后开始';
+}
+
+function countdownImpactTitle(signal: CountdownSignal) {
+  if (signal.kind === 'deadline') {
+    if (signal.urgency === 'overdue') return 'DEADLINE BREACHED!';
+    if (signal.urgency === 'finalTen') return 'TABOO: 10 SECONDS!';
+    if (signal.urgency === 'finalMinute') return 'FORBIDDEN MINUTE!';
+    if (signal.urgency === 'five') return 'DEADLINE: 5 MINUTES!';
+    return 'DEADLINE: 15 MINUTES!';
+  }
+  if (signal.urgency === 'overdue') return 'MISSION START NOW!';
+  if (signal.urgency === 'finalTen') return 'DANGER: 10 SECONDS!';
+  if (signal.urgency === 'finalMinute') return 'FINAL MINUTE!';
+  if (signal.urgency === 'five') return 'START IN 5 MINUTES!';
+  return 'START IN 15 MINUTES!';
 }
 
 function ChoiceField({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
@@ -542,8 +604,8 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
   onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDragEnd: () => void;
   onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void;
 }) {
-  const urgency = startUrgency(task, now);
-  return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${urgency ? `has-start-countdown start-${urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''}`}
+  const countdown = countdownSignals(task, now).sort(compareCountdownSignals)[0];
+  return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${countdown ? `has-countdown countdown-${countdown.kind} signal-${countdown.urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''}`}
     draggable tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
     <div className="card-stripe" />
@@ -552,7 +614,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{descriptionToText(task.description) || '\u00a0'}</p>
     {task.status === 'inProgress' && <span className="mission-state-signal" aria-hidden="true">LIVE</span>}
     {task.status === 'completed' && <span className="mission-state-signal" aria-hidden="true">CLEAR</span>}
-    {urgency && <div className={`start-countdown urgency-${urgency}`} role={urgency === 'overdue' || urgency === 'finalTen' ? 'alert' : 'status'}><div><span>{startUrgencyLabel(urgency)}</span><strong>{countdownText(task, now)}</strong><small>{formatTime(task.startedAt, false)} START</small></div><button type="button" onClick={(event) => { event.stopPropagation(); onStart(); }}>▶ ENGAGE</button></div>}
+    {countdown && <div className={`card-countdown countdown-${countdown.kind} urgency-${countdown.urgency}`} aria-label={`${countdownSignalLabel(countdown)} ${countdownText(countdown.targetAt, now)}`}><div><span>{countdown.kind === 'start' ? '▶ START' : '⊘ DEADLINE'}</span><small>{countdown.kind === 'start' ? '行动窗口' : '禁忌时限'}</small></div><strong>{countdownText(countdown.targetAt, now)}</strong>{countdown.kind === 'start' ? <button type="button" aria-label={`开始任务：${task.title}`} onClick={(event) => { event.stopPropagation(); onStart(); }}>▶</button> : <i className="deadline-seal" aria-hidden="true" />}</div>}
     <div className="card-meta"><span>{task.location}</span>
       {task.status === 'pending' && <span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span>}
       {task.status === 'inProgress' && <span>▶ {formatTime(task.startedAt)}</span>}
@@ -572,10 +634,11 @@ export default function Home() {
   const databaseRevision = useRef(0);
   const lastPersistedSnapshot = useRef('');
   const saveQueue = useRef(Promise.resolve());
-  const startReminderBands = useRef(new Map<string, StartUrgency>());
-  const startRemindersReady = useRef(false);
+  const reminderBands = useRef(new Map<string, CountdownUrgency>());
+  const remindersReady = useRef(false);
   const [view, setView] = useState<View>('board');
   const [viewRestored, setViewRestored] = useState(false);
+  const [dialogStateRestored, setDialogStateRestored] = useState(false);
   const [introVisible, setIntroVisible] = useState(false);
   const [introMinimumMet, setIntroMinimumMet] = useState(false);
   const [introProgress, setIntroProgress] = useState(0);
@@ -589,7 +652,7 @@ export default function Home() {
   const [draggingId, setDraggingId] = useState('');
   const [dropTarget, setDropTarget] = useState<Status | ''>('');
   const [landedId, setLandedId] = useState('');
-  const [impact, setImpact] = useState<{ title: string; subtitle: string; tier?: StartUrgency | 'action' } | null>(null);
+  const [impact, setImpact] = useState<{ title: string; subtitle: string; tier?: CountdownUrgency | 'action' } | null>(null);
   const [draft, setDraft] = useState<Task | null>(null);
   const [choiceField, setChoiceField] = useState<ChoiceFieldName | null>(null);
   const [dateField, setDateField] = useState<DateFieldName | null>(null);
@@ -613,15 +676,42 @@ export default function Home() {
   useEffect(() => {
     const savedView = window.sessionStorage.getItem(VIEW_SESSION_KEY);
     const restoredView = navItems.some((item) => item.id === savedView) ? savedView as View : navItems[0].id;
+    const savedDialogState = window.sessionStorage.getItem(DIALOG_SESSION_KEY);
+    let restoredDialogState: Partial<DialogSessionState> = {};
+    try {
+      restoredDialogState = savedDialogState ? JSON.parse(savedDialogState) as Partial<DialogSessionState> : {};
+    } catch {
+      restoredDialogState = {};
+    }
+    const restoredDraft = restoredDialogState.draft && typeof restoredDialogState.draft === 'object'
+      ? normalizeTasks([restoredDialogState.draft])[0]
+      : null;
+    const restoredChoiceField = restoredDraft && (['status', 'priority', 'taskType', 'location', 'recurrence'] as ChoiceFieldName[]).includes(restoredDialogState.choiceField as ChoiceFieldName)
+      ? restoredDialogState.choiceField as ChoiceFieldName
+      : null;
+    const restoredDateField = restoredDraft && (['startedAt', 'completedAt', 'dueAt'] as DateFieldName[]).includes(restoredDialogState.dateField as DateFieldName)
+      ? restoredDialogState.dateField as DateFieldName
+      : null;
+    const restoredPickerMonth = restoredDialogState.pickerMonth ? new Date(restoredDialogState.pickerMonth) : null;
     const timers = [window.setTimeout(() => {
       setView(restoredView);
       setViewRestored(true);
-      if (restoredView === navItems[0].id) {
+      setMenuOpen(restoredDialogState.menuOpen === true);
+      setDayAgendaOpen(restoredDialogState.dayAgendaOpen === true);
+      if (typeof restoredDialogState.selectedDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(restoredDialogState.selectedDay)) setSelectedDay(restoredDialogState.selectedDay);
+      setDraft(restoredDraft);
+      setChoiceField(restoredChoiceField);
+      setDateField(restoredDateField);
+      if (typeof restoredDialogState.pickerDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(restoredDialogState.pickerDate)) setPickerDate(restoredDialogState.pickerDate);
+      if (typeof restoredDialogState.pickerTime === 'string' && /^\d{2}:\d{2}$/.test(restoredDialogState.pickerTime)) setPickerTime(restoredDialogState.pickerTime);
+      if (restoredPickerMonth && !Number.isNaN(restoredPickerMonth.getTime())) setPickerMonth(restoredPickerMonth);
+      setDialogStateRestored(true);
+      if (restoredView === navItems[0].id && restoredDialogState.menuOpen !== true && restoredDialogState.dayAgendaOpen !== true && !restoredDraft) {
         setIntroVisible(true);
         setIntroProgress(8);
       }
     }, 0)];
-    if (restoredView === navItems[0].id) timers.push(
+    if (restoredView === navItems[0].id && restoredDialogState.menuOpen !== true && restoredDialogState.dayAgendaOpen !== true && !restoredDraft) timers.push(
       window.setTimeout(() => setIntroProgress(27), 260),
       window.setTimeout(() => setIntroProgress(51), 620),
       window.setTimeout(() => setIntroProgress(73), 1_020),
@@ -635,6 +725,22 @@ export default function Home() {
     if (!viewRestored) return;
     window.sessionStorage.setItem(VIEW_SESSION_KEY, view);
   }, [view, viewRestored]);
+
+  useEffect(() => {
+    if (!dialogStateRestored) return;
+    const dialogState: DialogSessionState = {
+      menuOpen,
+      dayAgendaOpen,
+      selectedDay,
+      draft,
+      choiceField: draft ? choiceField : null,
+      dateField: draft ? dateField : null,
+      pickerDate,
+      pickerTime,
+      pickerMonth: pickerMonth.toISOString(),
+    };
+    window.sessionStorage.setItem(DIALOG_SESSION_KEY, JSON.stringify(dialogState));
+  }, [choiceField, dateField, dayAgendaOpen, dialogStateRestored, draft, menuOpen, pickerDate, pickerMonth, pickerTime, selectedDay]);
 
   useEffect(() => {
     if (!introVisible || !introMinimumMet || !hydrated) return;
@@ -739,24 +845,20 @@ export default function Home() {
   }, [impact]);
   useEffect(() => {
     if (!hydrated) return;
-    const activeIds = new Set(tasks.filter((task) => task.status === 'pending' && task.startedAt).map((task) => task.id));
-    for (const id of startReminderBands.current.keys()) if (!activeIds.has(id)) startReminderBands.current.delete(id);
-    const reminding = tasks
-      .filter((task) => task.status === 'pending' && task.startedAt)
-      .map((task) => ({ task, urgency: startUrgency(task, clock) }))
-      .filter((item): item is { task: Task; urgency: StartUrgency } => Boolean(item.urgency))
-      .sort((a, b) => +new Date(a.task.startedAt) - +new Date(b.task.startedAt));
-    if (!startRemindersReady.current) {
-      for (const { task, urgency } of reminding) startReminderBands.current.set(task.id, urgency);
-      startRemindersReady.current = true;
+    const reminding = tasks.flatMap((task) => countdownSignals(task, clock)).sort(compareCountdownSignals);
+    const activeKeys = new Set(reminding.map((signal) => `${signal.task.id}:${signal.kind}`));
+    for (const key of reminderBands.current.keys()) if (!activeKeys.has(key)) reminderBands.current.delete(key);
+    if (!remindersReady.current) {
+      for (const signal of reminding) reminderBands.current.set(`${signal.task.id}:${signal.kind}`, signal.urgency);
+      remindersReady.current = true;
       return;
     }
-    const changed = reminding.find(({ task, urgency }) => startReminderBands.current.get(task.id) !== urgency);
-    for (const { task, urgency } of reminding) startReminderBands.current.set(task.id, urgency);
+    const changed = reminding.find((signal) => reminderBands.current.get(`${signal.task.id}:${signal.kind}`) !== signal.urgency);
+    for (const signal of reminding) reminderBands.current.set(`${signal.task.id}:${signal.kind}`, signal.urgency);
     if (!changed || changed.urgency === 'oneHour' || changed.urgency === 'halfHour') return;
     setImpact({
-      title: changed.urgency === 'overdue' ? 'MISSION START NOW!' : changed.urgency === 'finalTen' ? 'DANGER: 10 SECONDS!' : changed.urgency === 'finalMinute' ? 'FINAL MINUTE!' : changed.urgency === 'five' ? '5 MINUTES!' : '15 MINUTES!',
-      subtitle: `${changed.task.title} · ${startUrgencyLabel(changed.urgency)}`,
+      title: countdownImpactTitle(changed),
+      subtitle: `${changed.task.title} · ${countdownSignalLabel(changed)}`,
       tier: changed.urgency,
     });
   }, [clock, hydrated, tasks]);
@@ -949,10 +1051,8 @@ export default function Home() {
     return window ? [{ task, ...window, displayStartMinute: actionDayMinute(window.startMinute) }] : [];
   }).sort((a, b) => a.displayStartMinute - b.displayStartMinute), [selectedDayTasks, selectedDay, now]);
   const activeNav = navItems.find((item) => item.id === view)!;
-  const activeStartAlert = tasks
-    .filter((task) => task.status === 'pending' && task.startedAt && +new Date(task.startedAt) - +now <= 15 * 60_000)
-    .sort((a, b) => +new Date(a.startedAt) - +new Date(b.startedAt))[0];
-  const activeStartUrgency = activeStartAlert ? startUrgency(activeStartAlert, now) : null;
+  const activeCountdowns = tasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
+  const visibleCountdowns = activeCountdowns.slice(0, 4);
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
   if (!viewRestored) return <main className="app-shell boot-screen boot-prime" aria-label="正在准备界面" />;
@@ -990,7 +1090,7 @@ export default function Home() {
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
-    {view === 'board' && activeStartAlert && activeStartUrgency && <section className={`start-alert-hud urgency-${activeStartUrgency}`} aria-live="assertive"><span>{startUrgencyLabel(activeStartUrgency)}</span><div><strong>{activeStartAlert.title}</strong><small>{formatTime(activeStartAlert.startedAt, false)} · MOVE TO IN PROGRESS</small></div><time>{countdownText(activeStartAlert, now)}</time><button type="button" onClick={() => moveTask(activeStartAlert.id, 'inProgress')}>▶ START MISSION</button></section>}
+    {view === 'board' && visibleCountdowns.length > 0 && <section className={`countdown-hud-stack ${visibleCountdowns.length === 1 ? 'is-single' : ''}`} aria-label="当前任务倒计时">{visibleCountdowns.map((signal) => <article key={`${signal.task.id}-${signal.kind}`} className={`countdown-alert countdown-${signal.kind} urgency-${signal.urgency}`}><span><b>{signal.kind === 'start' ? '▶ START' : '⊘ TABOO'}</b><small>{countdownSignalLabel(signal)}</small></span><div><strong>{signal.task.title}</strong><small>{formatTime(signal.targetAt, false)} · {signal.kind === 'start' ? 'MOVE TO IN PROGRESS' : 'DEADLINE LOCK'}</small></div><time>{countdownText(signal.targetAt, now)}</time><button type="button" onClick={() => signal.kind === 'start' ? moveTask(signal.task.id, 'inProgress') : setDraft(signal.task)}>{signal.kind === 'start' ? '▶ START' : 'OPEN ›'}</button></article>)}{activeCountdowns.length > visibleCountdowns.length && <div className="countdown-overflow">＋{activeCountdowns.length - visibleCountdowns.length} MORE SIGNALS / 更多倒计时</div>}</section>}
 
     {view === 'board' && <section className="board" aria-label="任务看板">{boardMeta.map((board) => {
       const boardTasks = grouped[board.id];
@@ -1062,13 +1162,19 @@ export default function Home() {
       <section className="day-schedule-modal" role="dialog" aria-modal="true" aria-labelledby="day-schedule-title">
         <header><div><span>SCHOOL LIFE / DAILY FLOW</span><h2 id="day-schedule-title">{selectedDay.replaceAll('-', ' / ')}</h2><p>{selectedDayTasks.length} MISSIONS · 今天如何度过？</p></div><button type="button" className="close-button" aria-label="关闭 DAILY FLOW" onClick={() => setDayAgendaOpen(false)}>×</button></header>
         <div className="day-schedule-body"><section className="schedule-map"><header><span>TIME DISTRIBUTION</span><strong>全天任务分布</strong></header><div className="schedule-stage">
-          <div className="schedule-hours"><span>00</span><span>02</span><span>07</span><span>12</span><span>18</span><span>00</span><span>02</span><b>OFF<br />02—07</b></div>
-          <div className="schedule-lanes">{dayScheduleBlocks.map((block) => {
+          <div className="schedule-hours"><span>02</span><span>07</span><span>12</span><span>18</span><span>00</span><span>02</span><b>OFF<br />02—07</b></div>
+          <div className="schedule-lanes">
+            <div className="schedule-off-zone schedule-off-zone-midnight" aria-hidden="true" />
+            <div className="schedule-off-zone schedule-off-zone-morning" aria-hidden="true" />
+            {dayScheduleBlocks.map((block) => {
             const rawDuration = (block.endMinute - block.startMinute) / (ACTION_DAY_DISPLAY_MINUTES / 100);
-            const duration = Math.max(block.variant === 'in-progress' ? 4 : 1.4, rawDuration);
+            const duration = Math.max(block.variant === 'in-progress' ? 4.4 : 1.6, rawDuration);
             const crossDay = block.continuesBefore || block.continuesAfter;
-            const hideLabel = duration < 5.5 || block.laneCount > 3;
-            return <button key={block.id} aria-label={`${scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)} ${block.task.title}`} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
+            const laneWidth = 100 / block.laneCount;
+            const hideLabel = duration < 2.8 || laneWidth < 13;
+            const compactLabel = !hideLabel && (duration < 4.8 || laneWidth < 20);
+            const blockLabel = `${scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)} ${block.task.title}`;
+            return <button key={block.id} aria-label={blockLabel} title={blockLabel} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : compactLabel ? 'is-compact' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
           })}</div>
         </div></section><section className="schedule-list"><header><span>AFTER SCHOOL AGENDA</span><strong>当天任务表</strong></header><div className="timeline">{dayTimelineEntries.map((entry) => <button key={entry.task.id} onClick={() => setDraft(entry.task)}><time>{scheduleTimeLabel(entry.variant, entry.startMinute, entry.endMinute, !entry.continuesAfter)}</time><i className={`type-${typeColor(entry.task.taskType, settings)}`} /><div><strong>{entry.task.title}</strong><span>{entry.task.taskType} · {entry.task.location}</span></div></button>)}{!dayTimelineEntries.length && <div className="agenda-empty"><strong>FREE DAY!</strong><span>这一天还没有安排任务</span></div>}</div><button className="schedule-add" onClick={() => openNewTask('pending', new Date(`${selectedDay}T12:00`).toISOString())}>＋ ADD MISSION / 添加任务</button></section></div>
       </section>
@@ -1083,9 +1189,9 @@ export default function Home() {
       </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>删除任务</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">保存任务 <span>→</span></button></footer>
     </form></div>}
 
-    {choiceField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setChoiceField(null); }}><section className="persona-selector" role="dialog" aria-modal="true"><header><span>SELECT OPTION</span><strong>{choiceField === 'taskType' ? '任务类型' : choiceField === 'location' ? '地点' : choiceField === 'priority' ? '优先级' : choiceField === 'recurrence' ? '循环' : '状态'}</strong><button onClick={() => setChoiceField(null)}>×</button></header><div className={`selector-options selector-${choiceField}`}>{choiceOptions.map((option, index) => <button key={option.value} className={`${option.value === choiceValue ? 'active' : ''} ${option.color ? `type-${option.color}` : ''}`} onClick={() => selectChoice(option.value)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i>{option.value === choiceValue ? '●' : '○'}</i></button>)}</div><footer>CHOOSE YOUR MOVE · 选择后自动返回任务详情</footer></section></div>}
+    {choiceField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setChoiceField(null); }}><section className="persona-selector" role="dialog" aria-modal="true"><header><span>SELECT OPTION</span><strong>{choiceField === 'taskType' ? '任务类型' : choiceField === 'location' ? '地点' : choiceField === 'priority' ? '优先级' : choiceField === 'recurrence' ? '循环' : '状态'}</strong><button type="button" className="selector-close-button" aria-label="关闭选项窗口" onClick={() => setChoiceField(null)}>×</button></header><div className={`selector-options selector-${choiceField}`}>{choiceOptions.map((option, index) => <button key={option.value} className={`${option.value === choiceValue ? 'active' : ''} ${option.color ? `type-${option.color}` : ''}`} onClick={() => selectChoice(option.value)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i>{option.value === choiceValue ? '●' : '○'}</i></button>)}</div><footer>CHOOSE YOUR MOVE · 选择后自动返回任务详情</footer></section></div>}
 
-    {dateField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDateField(null); }}><section className="persona-selector time-selector" role="dialog" aria-modal="true"><header><span>SET TIME</span><strong>{dateField === 'startedAt' ? '开始时间' : dateField === 'completedAt' ? '完成时间' : '截止时间'}</strong><button onClick={() => setDateField(null)}>×</button></header><div className="time-toolbelt"><button onClick={() => { setDraft({ ...draft, [dateField]: new Date().toISOString() }); setDateField(null); }}><strong>NOW</strong><span>设为现在</span></button><button className="clear-time" onClick={() => { setDraft({ ...draft, [dateField]: '' }); setDateField(null); }}><strong>×</strong><span>清除时间</span></button></div><div className="custom-datetime"><section className="date-board"><header><button onClick={() => setPickerMonth(new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() - 1, 1))}>‹</button><strong>{pickerMonth.getFullYear()} / {String(pickerMonth.getMonth() + 1).padStart(2, '0')}</strong><button onClick={() => setPickerMonth(new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() + 1, 1))}>›</button></header><div className="picker-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div><div className="picker-days">{pickerCalendarDays.map((day) => { const key = localDateKey(day); return <button key={key} className={`${day.getMonth() !== pickerMonth.getMonth() ? 'outside' : ''} ${pickerDate === key ? 'active' : ''} ${key === localDateKey(new Date()) ? 'today' : ''}`} onClick={() => { setPickerDate(key); setPickerMonth(new Date(day.getFullYear(), day.getMonth(), 1)); }}>{day.getDate()}</button>; })}</div></section><section className="time-board"><span>SELECT TIME / 选择时间</span><label className="manual-time-input"><span>MANUAL INPUT / 手动输入</span><input type="time" step="60" value={pickerTime} onChange={(event) => setPickerTime(event.target.value)} aria-label="手动输入时间" /></label><strong>{String(pickerHour).padStart(2, '0')}<i>:</i>{String(pickerMinute).padStart(2, '0')}</strong><label>HOUR / 小时</label><div className="hour-grid">{Array.from({ length: 24 }, (_, hour) => <button key={hour} className={pickerHour === hour ? 'active' : ''} onClick={() => setPickerTime(`${String(hour).padStart(2, '0')}:${String(pickerMinute).padStart(2, '0')}`)}>{String(hour).padStart(2, '0')}</button>)}</div><label>MINUTE / 分钟</label><div className="minute-grid">{[0, 15, 30, 45, 59].map((minute) => <button key={minute} className={pickerMinute === minute ? 'active' : ''} onClick={() => setPickerTime(`${String(pickerHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)}>{String(minute).padStart(2, '0')}</button>)}</div></section></div><button className="time-confirm" onClick={applyDatePicker}>CONFIRM · {pickerDate.replaceAll('-', ' / ')} · {pickerTime} <span>→</span></button></section></div>}
+    {dateField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDateField(null); }}><section className="persona-selector time-selector" role="dialog" aria-modal="true"><header><span>SET TIME</span><strong>{dateField === 'startedAt' ? '开始时间' : dateField === 'completedAt' ? '完成时间' : '截止时间'}</strong><button type="button" className="selector-close-button" aria-label="关闭时间窗口" onClick={() => setDateField(null)}>×</button></header><div className="time-toolbelt"><button onClick={() => { setDraft({ ...draft, [dateField]: new Date().toISOString() }); setDateField(null); }}><strong>NOW</strong><span>设为现在</span></button><button className="clear-time" onClick={() => { setDraft({ ...draft, [dateField]: '' }); setDateField(null); }}><strong>×</strong><span>清除时间</span></button></div><div className="custom-datetime"><section className="date-board"><header><button onClick={() => setPickerMonth(new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() - 1, 1))}>‹</button><strong>{pickerMonth.getFullYear()} / {String(pickerMonth.getMonth() + 1).padStart(2, '0')}</strong><button onClick={() => setPickerMonth(new Date(pickerMonth.getFullYear(), pickerMonth.getMonth() + 1, 1))}>›</button></header><div className="picker-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div><div className="picker-days">{pickerCalendarDays.map((day) => { const key = localDateKey(day); return <button key={key} className={`${day.getMonth() !== pickerMonth.getMonth() ? 'outside' : ''} ${pickerDate === key ? 'active' : ''} ${key === localDateKey(new Date()) ? 'today' : ''}`} onClick={() => { setPickerDate(key); setPickerMonth(new Date(day.getFullYear(), day.getMonth(), 1)); }}>{day.getDate()}</button>; })}</div></section><section className="time-board"><span>SELECT TIME / 选择时间</span><label className="manual-time-input"><span>MANUAL INPUT / 手动输入</span><input type="time" step="60" value={pickerTime} onChange={(event) => setPickerTime(event.target.value)} aria-label="手动输入时间" /></label><strong>{String(pickerHour).padStart(2, '0')}<i>:</i>{String(pickerMinute).padStart(2, '0')}</strong><label>HOUR / 小时</label><div className="hour-grid">{Array.from({ length: 24 }, (_, hour) => <button key={hour} className={pickerHour === hour ? 'active' : ''} onClick={() => setPickerTime(`${String(hour).padStart(2, '0')}:${String(pickerMinute).padStart(2, '0')}`)}>{String(hour).padStart(2, '0')}</button>)}</div><label>MINUTE / 分钟</label><div className="minute-grid">{[0, 15, 30, 45, 59].map((minute) => <button key={minute} className={pickerMinute === minute ? 'active' : ''} onClick={() => setPickerTime(`${String(pickerHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)}>{String(minute).padStart(2, '0')}</button>)}</div></section></div><button className="time-confirm" onClick={applyDatePicker}>CONFIRM · {pickerDate.replaceAll('-', ' / ')} · {pickerTime} <span>→</span></button></section></div>}
 
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
   </main>;
