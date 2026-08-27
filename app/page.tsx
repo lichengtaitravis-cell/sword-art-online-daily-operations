@@ -1,6 +1,8 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { BrandLockup } from './components/BrandLockup';
+import { loadPlannerState, savePlannerState } from './lib/planner-store';
 
 type Status = 'pending' | 'inProgress' | 'completed';
 type Priority = 'must' | 'high' | 'medium' | 'low';
@@ -233,6 +235,12 @@ export default function Home() {
   const [tasks, setTasks] = useState<Task[]>(seedTasks);
   const [settings, setSettings] = useState<PlannerSettings>(DEFAULT_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
+  const [storageError, setStorageError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [saveRetry, setSaveRetry] = useState(0);
+  const databaseRevision = useRef(0);
+  const lastPersistedSnapshot = useRef('');
+  const saveQueue = useRef(Promise.resolve());
   const [view, setView] = useState<View>('board');
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<'day' | 'night'>('day');
@@ -263,23 +271,90 @@ export default function Home() {
   const [customLocation, setCustomLocation] = useState('');
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      try {
-        const savedTasks = localStorage.getItem(TASK_KEY) || localStorage.getItem(LEGACY_TASK_KEY);
-        const savedSettings = localStorage.getItem(SETTINGS_KEY);
-        const savedTheme = localStorage.getItem(THEME_KEY);
-        if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
-        if (savedTheme === 'night') setTheme('night');
-        if (savedTasks) setTasks(processRecurring(normalizeTasks(JSON.parse(savedTasks))));
-      } catch { setTasks(seedTasks()); }
-      setHydrated(true);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
+    let cancelled = false;
 
-  useEffect(() => { if (hydrated) localStorage.setItem(TASK_KEY, JSON.stringify(tasks)); }, [tasks, hydrated]);
-  useEffect(() => { if (hydrated) localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }, [settings, hydrated]);
-  useEffect(() => { if (hydrated) localStorage.setItem(THEME_KEY, theme); }, [theme, hydrated]);
+    const hydrateFromDatabase = async () => {
+      try {
+        let databaseState = await loadPlannerState<Task, PlannerSettings>();
+        if (cancelled) return;
+
+        if (!databaseState.initialized) {
+          const savedTasks = localStorage.getItem(TASK_KEY) || localStorage.getItem(LEGACY_TASK_KEY);
+          const savedSettings = localStorage.getItem(SETTINGS_KEY);
+          const savedTheme = localStorage.getItem(THEME_KEY);
+          const importedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
+          const importedTheme = savedTheme === 'night' ? 'night' : 'day';
+          const importedTasks = processRecurring(savedTasks ? normalizeTasks(JSON.parse(savedTasks)) : seedTasks());
+          const imported = await savePlannerState<Task, PlannerSettings>({
+            expectedRevision: databaseState.revision,
+            tasks: importedTasks,
+            settings: importedSettings,
+            theme: importedTheme,
+            migrationSource: `localStorage@${window.location.origin}`,
+          });
+          databaseState = imported.state;
+          localStorage.removeItem(TASK_KEY);
+          localStorage.removeItem(LEGACY_TASK_KEY);
+          localStorage.removeItem(SETTINGS_KEY);
+          localStorage.removeItem(THEME_KEY);
+        }
+
+        if (cancelled) return;
+        const normalizedSettings = { ...DEFAULT_SETTINGS, ...(databaseState.settings ?? {}) };
+        const normalizedTasks = normalizeTasks(databaseState.tasks);
+        const recurringTasks = processRecurring(normalizedTasks);
+        databaseRevision.current = databaseState.revision;
+        lastPersistedSnapshot.current = JSON.stringify({
+          tasks: normalizedTasks,
+          settings: normalizedSettings,
+          theme: databaseState.theme,
+        });
+        setSettings(normalizedSettings);
+        setTheme(databaseState.theme);
+        setTasks(recurringTasks);
+        setHydrated(true);
+      } catch (error) {
+        if (!cancelled) setStorageError(error instanceof Error ? error.message : '无法连接本地数据库');
+      }
+    };
+
+    void hydrateFromDatabase();
+    return () => { cancelled = true; };
+  }, [loadAttempt]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const snapshot = JSON.stringify({ tasks, settings, theme });
+    if (snapshot === lastPersistedSnapshot.current) return;
+    const timer = window.setTimeout(() => {
+      saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
+        if (snapshot === lastPersistedSnapshot.current) return;
+        try {
+          const pending = JSON.parse(snapshot) as { tasks: Task[]; settings: PlannerSettings; theme: 'day' | 'night' };
+          const result = await savePlannerState<Task, PlannerSettings>({
+            expectedRevision: databaseRevision.current,
+            ...pending,
+          });
+          databaseRevision.current = result.state.revision;
+          if (result.conflicted) {
+            const currentSettings = { ...DEFAULT_SETTINGS, ...(result.state.settings ?? {}) };
+            const currentTasks = normalizeTasks(result.state.tasks);
+            lastPersistedSnapshot.current = JSON.stringify({ tasks: currentTasks, settings: currentSettings, theme: result.state.theme });
+            setTasks(currentTasks);
+            setSettings(currentSettings);
+            setTheme(result.state.theme);
+            setToast('DATABASE UPDATED · 已载入较新的数据');
+            return;
+          }
+          lastPersistedSnapshot.current = snapshot;
+        } catch {
+          setToast('DATABASE OFFLINE · 修改尚未保存，正在等待重试');
+          window.setTimeout(() => setSaveRetry((current) => current + 1), 1_500);
+        }
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [tasks, settings, theme, hydrated, saveRetry]);
   useEffect(() => { const interval = window.setInterval(() => setTasks((current) => processRecurring(current)), 60_000); return () => window.clearInterval(interval); }, []);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2200); return () => window.clearTimeout(timer); }, [toast]);
   useEffect(() => { if (!impact) return; const timer = window.setTimeout(() => { setImpact(null); setLandedId(''); }, 900); return () => window.clearTimeout(timer); }, [impact]);
@@ -442,7 +517,8 @@ export default function Home() {
   const selectedDayTasks = tasks.filter((task) => { const value = calendarTaskDate(task); return value && localDateKey(new Date(value)) === selectedDay; }).sort((a, b) => +new Date(calendarTaskDate(a)) - +new Date(calendarTaskDate(b)));
   const activeNav = navItems.find((item) => item.id === view)!;
 
-  if (!hydrated) return <main className="app-shell boot-screen"><div className="boot-mark"><span>LOADING DAILY OPS</span><strong>SWORD ART<br />ONLINE</strong><i /></div></main>;
+  if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
+  if (!hydrated) return <main className="app-shell boot-screen"><div className="boot-mark"><span>CONNECTING SQLITE</span><strong>SWORD ART<br />ONLINE</strong><i /></div></main>;
 
   return <main className={`app-shell view-${view} theme-${theme} page-motion-${pageMotion} page-direction-${pageDirection}`}>
     <div className="tv-noise" aria-hidden="true" />
@@ -459,18 +535,7 @@ export default function Home() {
     {(menuOpen || pageMotion === 'exit') && <button className={`menu-scrim ${pageMotion === 'exit' ? 'is-closing' : ''}`} aria-label="关闭菜单" onClick={() => setMenuOpen(false)} />}
 
     <header className="hero">
-      <div className="brand-lockup">
-        <div className="brand-kicker"><span>2DIMENSIONALM</span><b>CHANNEL 04</b></div>
-        <h1 aria-label="Sword Art Online">
-          <span className="brand-signal" aria-hidden="true"><b>SAO</b><i>04</i></span>
-          <span className="logo-sword" aria-hidden="true">SWORD</span>
-          <span className="logo-art" aria-hidden="true">ART</span>
-          <strong aria-hidden="true">ONLINE</strong>
-          <span className="brand-burst" aria-hidden="true">✦</span>
-        </h1>
-        <div className="brand-channel" aria-hidden="true"><span>DAILY OPS</span><i>{'///'}</i><b>FACE THE DAY</b></div>
-        <p>{activeNav.title} / {activeNav.subtitle}</p>
-      </div>
+      <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} />
       <div className="day-card" aria-label="今日日期"><span>{new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now).toUpperCase()}</span><strong>{String(now.getDate()).padStart(2, '0')}</strong><em>{new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(now).toUpperCase()}</em></div>
       <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {tasks.length}</small></strong><div className="summary-track"><i style={{ width: `${tasks.length ? Math.min(100, completedToday / tasks.length * 100) : 0}%` }} /></div></div>
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}

@@ -2,7 +2,8 @@
 
 Status: active design contract  
 Applies to: all product UI, motion, and brand extensions in this workspace  
-Implementation sources: `app/design-tokens.css`, `app/brand.css`, and `app/globals.css`
+Implementation sources: `app/design-tokens.css`, `app/brand.css`, `app/components/BrandLockup.tsx`, and `app/globals.css`
+Evidence source: `docs/moodboard/p4g/`
 
 ## 1. Design position
 
@@ -22,8 +23,10 @@ The following are design observations inferred from official Atlus and Sega prom
 
 - **Yellow is the world, not merely an accent.** It creates immediate franchise-level recognition and lets black/white UI blocks read like cut paper or broadcast captions.
 - **Black and white establish structure.** Thick outlines, hard shadows, and solid black rails make the bright palette controllable instead of childish.
-- **Secondary colors behave like TV color bars.** Orange, green, red, blue, and violet appear in short, decisive runs rather than as competing page backgrounds.
+- **Secondary colors behave like TV color bars outside the wordmark.** Orange, green, red, blue, and violet belong to background bands, illustration, category semantics, or a tiny signal detail. The title face itself stays overwhelmingly black, white, and yellow.
 - **The composition feels assembled live.** Rotations, offsets, irregular crops, sticker-like badges, silhouettes, circles, dots, and diagonal bands create momentum.
+- **The logo is not assembled from independent pieces.** Across the supplied references, primary and secondary title lines share one typographic family, one visual center, one slant, and one coherent outlined silhouette.
+- **Depth is structural.** The letter face, ink outline, rear extrusion, and yellow keyline repeat along a single displacement vector; perspective belongs to the complete wordmark plane.
 - **Television is both story motif and UI metaphor.** Screens, scanlines, signal noise, frames, channel labels, and sudden transitions support the Midnight Channel premise described by Sega.
 - **Everyday life and supernatural investigation coexist.** Calendars, school-life choices, character relationships, and combat share equal importance in the official product presentation. For this planner, that maps naturally to friendly daily scheduling wrapped in a mission-oriented HUD.
 
@@ -33,6 +36,10 @@ Primary visual references:
 - [Persona 4 Golden — official Japanese P4G site](https://p-atlus.jp/p4g/v/)
 - [Persona 4 Golden — Sega product page and gameplay screenshots](https://www.sega.jp/game/detail/remaster-p4g/)
 - [Persona 4 Golden Remaster — official Japanese site](https://p-ch.jp/remaster/p4g/)
+
+Workspace evidence:
+
+- `docs/moodboard/p4g/README.md` documents the eight user-provided references and the specific constraint each one supports.
 
 ## 3. Core principles
 
@@ -81,11 +88,12 @@ Rules:
 
 ### Typography
 
-- **Display:** `--font-display`; very heavy, slightly condensed, italic or skewed by the container. Use for brand words, page banners, results, and large counts.
+- **Logo:** `--font-logo`; one high-contrast, heavy serif family across every title line. Perspective and italic energy come from the shared wordmark plane, not from mixing unrelated typefaces.
+- **Display:** `--font-display`; very heavy and slightly condensed. Use for page banners, results, and large counts outside the logo.
 - **Interface:** `--font-ui`; condensed, high-weight, tabular where useful. Use for buttons, status, chips, dates, and metadata.
 - **Body:** `--font-body`; normal proportions. Use for task descriptions, instructions, and longer Chinese copy.
 - Uppercase English labels may use `.08em–.16em` tracking. Do not apply wide tracking to Chinese body text.
-- Do not use serif display faces for the core product identity; they read as fantasy/editorial instead of retro broadcast pop.
+- Never mix serif and sans-serif faces inside the primary wordmark. Small operational metadata may use `--font-ui`, but it must remain subordinate.
 
 ### Line, cut, and shadow
 
@@ -94,6 +102,7 @@ Rules:
 - Standard hard shadow: `--shadow-pop`; prominent feedback: `--shadow-loud`.
 - Prefer polygon cut tokens (`--cut-soft`, `--cut-loud`) and small rotations over rounded “SaaS card” corners.
 - Apply rotation to an outer wrapper. Counter-rotate long text when necessary so reading remains level.
+- A logo requires real layered depth: face → ink stroke → ink extrusion → yellow rear keyline. A single flat shadow is insufficient.
 
 ### Texture recipes
 
@@ -129,16 +138,31 @@ Use texture on large empty surfaces or decorative pseudo-elements—not behind d
 - Dense horizontal content such as archive tables may scroll; primary actions and dialogs must not require horizontal scrolling.
 - Decorative patterns should simplify or reduce opacity below 760px.
 
-## 6. Component language
+## 6. Logo geometry harness
+
+The wordmark is governed by hard constraints rather than mood alone:
+
+1. **One plane:** all title lines are descendants of `.brand-plane` and receive `--logo-plane` once.
+2. **One vanishing direction:** the complete mark uses a shared perspective/rotation/skew transform. Individual words do not rotate independently.
+3. **One extrusion vector:** `--logo-depth-x` and `--logo-depth-y` define the displacement for every title line.
+4. **One face system:** every title uses `.logo-face`, `--font-logo`, paper fill, ink stroke, ink extrusion, and a yellow rear keyline.
+5. **Limited palette:** the logo may use only ink, paper, and signal yellow. Supporting spectrum colors are forbidden in `app/brand.css`.
+6. **Unified silhouette:** title lines overlap and lock together. They must not appear as detached cards, labels, or independently colored tiles.
+7. **Responsive integrity:** mobile scales the complete lockup as a unit; it never reflows or restacks individual title fragments.
+
+`npm run design:check` verifies the reference set, markup structure, shared perspective/depth tokens, palette restriction, and removal of fragmented legacy classes. The check is intentionally part of `npm run lint`.
+
+## 7. Component language
 
 ### Brand lockup
 
-The current lockup is defined in `app/brand.css`.
+The current lockup is defined by `app/components/BrandLockup.tsx` and `app/brand.css`.
 
-- `SAO / 04` is the channel identifier and CRT-shaped anchor.
-- `SWORD`, `ART`, and `ONLINE` are separate cut-paper broadcast captions.
-- `DAILY OPS / FACE THE DAY` makes the planner purpose explicit.
-- Orange and green are short signal accents; yellow and ink remain dominant.
+- `SWORD ART` is one primary face rather than two independently styled tiles.
+- `ONLINE` uses the same face, outline, depth direction, and spatial plane at a smaller hierarchy.
+- The full mark leans upward in one perspective system and extrudes down-right along one vector.
+- Paper letter faces, ink outlines/extrusion, and a signal-yellow rear keyline form the complete depth stack.
+- `04` and operational metadata are subordinate registration details, not competing logo fragments.
 - Keep the accessible name on the `h1`; decorative fragments remain hidden from assistive technology.
 
 Do not place the lockup on a busy photograph, recolor individual letters arbitrarily, remove its hard outlines, or reproduce the official P4G logo geometry.
@@ -180,7 +204,7 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 - Keep takeover feedback under one second for routine actions.
 - Toasts must use `role="status"` and should not block the next action.
 
-## 7. Motion and micro-interactions
+## 8. Motion and micro-interactions
 
 Use the durations and easing variables from `app/design-tokens.css`.
 
@@ -193,14 +217,17 @@ Use the durations and easing variables from `app/design-tokens.css`.
 
 Every animation must have a meaningful static end state. Respect `prefers-reduced-motion`; remove transforms and flashes rather than merely slowing them down.
 
-## 8. Implementation architecture
+## 9. Implementation architecture
 
 ### Current structure
 
 - `app/design-tokens.css`: semantic visual primitives; edit here when changing the system.
-- `app/brand.css`: brand lockup only; it intentionally loads after the large legacy stylesheet.
-- `app/globals.css`: application shell, layouts, existing components, theme, and motion.
+- `app/components/BrandLockup.tsx`: accessible wordmark structure and the single shared brand plane.
+- `app/brand.css`: brand geometry only; it intentionally loads after the large legacy stylesheet.
+- `app/globals.css`: application shell, layouts, existing components, theme, and motion. It must not contain `.brand-*` or `.logo-*` selectors.
 - `app/page.tsx`: current UI and state. New repeated visual patterns should become components rather than additional inline markup.
+- `docs/moodboard/p4g/`: internal evidence set. Never import these copyrighted references into the running application.
+- `scripts/check-design-harness.mjs`: static enforcement for the wordmark contract.
 
 ### Scaling path
 
@@ -209,7 +236,6 @@ When the next two or three shared components are added, introduce:
 ```text
 app/
   components/
-    BrandLockup.tsx
     SignalBadge.tsx
     AngularPanel.tsx
     MissionCard.tsx
@@ -221,7 +247,7 @@ Component APIs should expose meaning, not raw decoration. Prefer `tone="warning"
 
 Tailwind may continue to provide utility parsing, but the design contract remains CSS-variable-first. Do not duplicate the palette in a JavaScript config unless a library requires literal values; if it does, document how the values stay synchronized.
 
-## 9. Accessibility and usability guardrails
+## 10. Accessibility and usability guardrails
 
 - Minimum touch target: 44×44px.
 - Maintain visible focus for every interactive element.
@@ -231,7 +257,7 @@ Tailwind may continue to provide utility parsing, but the design contract remain
 - Test day and night themes independently; a token that works on yellow may fail on charcoal.
 - Keep Chinese task text at a comfortable body size even when English labels are condensed.
 
-## 10. Review checklist
+## 11. Review checklist
 
 Before merging a visual change, confirm:
 
@@ -243,5 +269,7 @@ Before merging a visual change, confirm:
 - Is focus visible, contrast sufficient, and state non-color-dependent?
 - Does it work in both themes and at narrow/mobile width?
 - Does the result feel like an original broadcast-planner identity rather than a copied Persona asset?
+- Do all logo words share the exact same plane, family, outline, depth vector, and limited palette?
+- Does the logo read as one three-dimensional silhouette rather than several decorated rectangles?
 
-Then run `npm run lint`, `npm run build`, and browser-check the affected desktop and mobile layouts.
+Then run `npm run design:check`, `npm run lint`, `npm run build`, and browser-check the affected desktop and mobile layouts.

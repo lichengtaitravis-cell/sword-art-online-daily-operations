@@ -22,6 +22,7 @@
   --color-line:#d4cfb5;
 
   /* Typography */
+  --font-logo:Baskerville,'Baskerville Old Face','Iowan Old Style','Times New Roman',serif;
   --font-display:'Arial Black','Avenir Next Condensed','Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
   --font-ui:'Avenir Next Condensed','Arial Narrow','Roboto Condensed','Helvetica Neue','PingFang SC','Noto Sans SC',sans-serif;
   --font-body:Arial,'Noto Sans SC','PingFang SC',sans-serif;

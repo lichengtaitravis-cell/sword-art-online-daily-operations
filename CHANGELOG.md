@@ -1,0 +1,13 @@
+# Changelog
+
+All notable project changes will be documented in this file.
+
+## Unreleased
+
+### Added
+
+- Local SQLite source of truth with transactional state writes
+- One-time browser-storage migration and immutable migration backup
+- Database backup and legacy recovery utilities
+- Unified P4G-inspired perspective wordmark and design harness
+- GitHub Actions quality gate and repository documentation

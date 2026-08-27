@@ -1,15 +1,25 @@
 {
-  "name": "sites-project",
+  "name": "sword-art-online-daily-operations",
   "version": "0.1.0",
+  "description": "A local-first mission planner with a retro JRPG-inspired interface and SQLite persistence.",
   "private": true,
+  "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
+    "dev": "node scripts/run-local-app.mjs dev",
+    "dev:web": "vinext dev --port 1998",
+    "db": "node scripts/local-db-server.mjs",
+    "db:backup": "node scripts/backup-local-db.mjs",
+    "recover:legacy": "node scripts/recover-legacy-storage.mjs",
     "build": "vinext build",
-    "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "start": "node scripts/run-local-app.mjs start",
+    "start:web": "vinext start --port 1998",
+    "design:check": "node scripts/check-design-harness.mjs",
+    "lint": "npm run design:check && eslint . --ignore-pattern dist --ignore-pattern .next",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {
     "next": "16.2.6",

@@ -1,299 +1,236 @@
 /*
- * Sword Art Online identity lockup.
- * P4G-inspired broadcast energy, built as original CSS/HTML—not a traced game logo.
+ * Sword Art Online wordmark.
+ * One type family, one perspective plane, one extrusion vector, three colors.
+ * Evidence and non-negotiables: docs/moodboard/p4g and docs/STYLE_GUIDE.md.
  */
 
 .brand-lockup {
+  --logo-depth-x:6px;
+  --logo-depth-y:8px;
+  --logo-plane:perspective(760px) rotateY(-10deg) rotateZ(-7deg) skewX(-4deg);
   position:relative;
   z-index:1;
-  width:448px;
-  min-width:448px;
+  width:470px;
+  min-width:470px;
   align-self:center;
-  isolation:isolate;
-  transform:rotate(-1deg);
-}
-
-.brand-lockup::before {
-  content:'';
-  position:absolute;
-  z-index:-2;
-  left:32px;
-  top:27px;
-  width:386px;
-  height:108px;
-  opacity:.16;
-  background:
-    linear-gradient(45deg,var(--color-ink) 25%,transparent 25%) 0 0/12px 12px,
-    linear-gradient(45deg,transparent 75%,var(--color-ink) 75%) 0 0/12px 12px,
-    linear-gradient(45deg,transparent 75%,var(--color-ink) 75%) 6px -6px/12px 12px,
-    linear-gradient(45deg,var(--color-ink) 25%,transparent 25%) 6px 6px/12px 12px;
-  clip-path:var(--cut-loud);
-  transform:rotate(2deg);
-}
-
-.brand-lockup::after {
-  content:'';
-  position:absolute;
-  z-index:-1;
-  left:58px;
-  top:117px;
-  width:360px;
-  height:17px;
-  display:block;
-  border:3px solid var(--color-ink);
-  background:linear-gradient(90deg,var(--color-orange) 0 27%,var(--color-paper) 27% 43%,var(--color-green) 43% 69%,var(--color-signal) 69%);
-  box-shadow:4px 4px 0 var(--color-ink);
-  transform:skew(-18deg) rotate(-2deg);
-}
-
-.brand-kicker {
-  position:relative;
-  z-index:8;
-  display:inline-flex;
-  align-items:center;
-  margin:0 0 0 82px;
-  padding:0;
-  color:var(--color-paper);
-  background:var(--color-ink);
-  border:3px solid var(--color-ink);
-  font-family:var(--font-ui);
-  font-size:9px;
-  font-weight:900;
-  letter-spacing:.15em;
-  line-height:1;
-  transform:skew(-9deg) rotate(-1deg);
-}
-
-.brand-kicker span,
-.brand-kicker b {
-  display:block;
-  padding:5px 9px;
-}
-
-.brand-kicker b {
-  color:var(--color-ink);
-  background:var(--color-signal);
-  font-weight:1000;
+  perspective:900px;
 }
 
 .brand-lockup h1 {
   position:relative;
-  width:448px;
-  height:112px;
+  width:470px;
+  height:154px;
   margin:0;
   overflow:visible;
-  font-family:var(--font-display);
+  font-family:var(--font-logo);
   font-style:normal;
   line-height:1;
   letter-spacing:0;
   transform:none;
 }
 
-.brand-lockup h1 span,
-.brand-lockup h1 strong {
+.brand-lockup h1 .brand-plane {
   position:absolute;
+  z-index:2;
+  inset:0;
   display:block;
-  margin:0;
-  box-sizing:border-box;
-  font-family:var(--font-display);
-  font-style:italic;
-  font-weight:1000;
-  line-height:.82;
+  color:var(--color-paper);
+  font-family:var(--font-logo);
+  font-size:inherit;
+  line-height:1;
   text-shadow:none;
   -webkit-text-stroke:0;
-  filter:none;
+  filter:drop-shadow(2px 3px 0 rgba(17,18,15,.18));
+  transform:var(--logo-plane);
+  transform-origin:28% 58%;
+  transform-style:preserve-3d;
+  animation:logoPlaneIn 420ms var(--ease-pop) both;
 }
 
-.brand-lockup h1 .brand-signal {
-  z-index:7;
-  left:2px;
-  top:2px;
-  width:105px;
-  height:91px;
-  display:grid;
-  place-items:center;
-  color:var(--color-paper);
-  background:
-    repeating-linear-gradient(0deg,transparent 0 4px,rgba(255,255,255,.08) 4px 5px),
-    var(--color-ink);
-  border:4px solid var(--color-paper);
-  outline:4px solid var(--color-ink);
-  box-shadow:7px 7px 0 var(--color-orange),11px 11px 0 var(--color-ink);
-  clip-path:polygon(9% 0,100% 5%,94% 91%,14% 100%,0 78%,3% 11%);
-  transform:rotate(-4deg);
-  animation:brandSignalIn var(--duration-enter) var(--ease-pop) both;
+.brand-plane::before {
+  display:none;
 }
 
-.brand-signal b {
-  font-size:32px;
-  letter-spacing:-.11em;
-  transform:skew(-8deg);
-}
-
-.brand-signal i {
+.brand-plane::after {
+  content:'';
   position:absolute;
-  right:7px;
-  bottom:7px;
-  display:grid;
-  place-items:center;
-  width:29px;
-  height:29px;
-  color:var(--color-ink);
-  background:var(--color-signal);
-  border:3px solid var(--color-paper);
-  border-radius:50%;
-  font-family:var(--font-ui);
-  font-size:10px;
-  font-style:normal;
-  font-weight:1000;
+  z-index:-3;
+  left:2px;
+  right:6px;
+  bottom:17px;
+  height:7px;
+  background:var(--color-ink);
+  transform:skewX(-24deg);
 }
 
-.brand-lockup h1 .logo-sword,
-.brand-lockup h1 .logo-art {
-  z-index:4;
-  top:10px;
-  height:54px;
-  padding:9px 13px 5px;
-  color:var(--color-ink);
-  background:var(--color-paper);
-  border:5px solid var(--color-ink);
-  box-shadow:5px 6px 0 var(--color-signal);
-  font-size:45px;
-  letter-spacing:-.095em;
-  white-space:nowrap;
-  transform:skew(-8deg) rotate(-2deg);
-  animation:brandWordIn var(--duration-enter) var(--ease-pop) 70ms both;
-}
-
-.brand-lockup h1 .logo-sword {
-  left:88px;
-  width:246px;
-  clip-path:polygon(3% 0,100% 5%,94% 100%,0 91%);
-}
-
-.brand-lockup h1 .logo-art {
-  z-index:5;
-  left:318px;
-  top:15px;
-  width:124px;
-  color:var(--color-paper);
-  background:var(--color-orange);
-  box-shadow:5px 6px 0 var(--color-green);
-  clip-path:polygon(8% 4%,100% 0,94% 92%,0 100%);
-  transform:skew(-7deg) rotate(3deg);
-  animation-delay:110ms;
-}
-
-.brand-lockup h1 strong {
-  z-index:6;
-  left:113px;
-  top:66px;
-  width:291px;
-  height:45px;
-  padding:7px 17px 4px;
+.brand-lockup h1 .brand-edition {
+  position:absolute;
+  z-index:7;
+  left:28px;
+  top:3px;
+  display:block;
+  padding:4px 10px 3px;
   color:var(--color-signal);
   background:var(--color-ink);
-  border:4px solid var(--color-paper);
-  outline:4px solid var(--color-ink);
-  box-shadow:8px 8px 0 var(--color-green);
-  clip-path:polygon(4% 0,100% 4%,95% 100%,0 91%);
-  font-size:31px;
-  letter-spacing:.16em;
-  text-align:center;
-  transform:skew(-9deg) rotate(-1deg);
-  animation:brandWordIn var(--duration-enter) var(--ease-pop) 150ms both;
+  border:2px solid var(--color-paper);
+  outline:2px solid var(--color-ink);
+  font-family:var(--font-ui);
+  font-size:9px;
+  font-style:normal;
+  font-weight:1000;
+  letter-spacing:.15em;
+  line-height:1;
+  text-shadow:none;
+  -webkit-text-stroke:0;
+  white-space:nowrap;
+  filter:none;
+  transform:none;
 }
 
-.brand-lockup h1 .brand-burst {
-  z-index:9;
-  right:-2px;
-  top:73px;
+.brand-lockup h1 .logo-face {
+  position:absolute;
+  z-index:4;
+  display:block;
+  margin:0;
+  padding:0;
+  color:var(--color-paper);
+  background:transparent;
+  border:0;
+  outline:0;
+  box-shadow:none;
+  clip-path:none;
+  font-family:var(--font-logo);
+  font-style:italic;
+  font-weight:900;
+  line-height:.78;
+  letter-spacing:-.075em;
+  text-align:left;
+  white-space:nowrap;
+  -webkit-text-stroke:5px var(--color-ink);
+  paint-order:stroke fill;
+  text-shadow:none;
+  filter:none;
+  transform:none;
+  isolation:isolate;
+}
+
+.logo-face::before,
+.logo-face::after {
+  content:attr(data-text);
+  position:absolute;
+  inset:0;
+  display:block;
+  font:inherit;
+  letter-spacing:inherit;
+  line-height:inherit;
+  white-space:nowrap;
+  pointer-events:none;
+}
+
+.logo-face::before {
+  z-index:-1;
+  color:var(--color-ink);
+  -webkit-text-stroke:7px var(--color-ink);
+  transform:translate(var(--logo-depth-x),var(--logo-depth-y));
+}
+
+.logo-face::after {
+  z-index:-2;
+  color:transparent;
+  -webkit-text-stroke:11px var(--color-signal);
+  transform:translate(calc(var(--logo-depth-x) + 3px),calc(var(--logo-depth-y) + 4px));
+}
+
+.brand-lockup h1 .logo-primary {
+  left:17px;
+  top:32px;
+  font-size:63px;
+}
+
+.brand-lockup h1 .logo-secondary {
+  left:139px;
+  top:94px;
+  width:auto;
+  height:auto;
+  font-size:38px;
+  letter-spacing:.115em;
+}
+
+.brand-lockup h1 .brand-index {
+  position:absolute;
+  z-index:8;
+  right:8px;
+  top:99px;
   display:grid;
   place-items:center;
-  width:41px;
-  height:41px;
+  width:39px;
+  height:39px;
   color:var(--color-ink);
   background:var(--color-signal);
   border:4px solid var(--color-ink);
   border-radius:50%;
-  box-shadow:3px 3px 0 var(--color-paper);
-  font-size:23px;
-  transform:rotate(9deg);
-  animation:brandSignalIn var(--duration-enter) var(--ease-pop) 220ms both;
-}
-
-.brand-channel {
-  position:relative;
-  z-index:8;
-  display:flex;
-  align-items:center;
-  width:max-content;
-  margin:-1px 0 0 87px;
-  color:var(--color-paper);
-  background:var(--color-ink);
-  border:2px solid var(--color-ink);
+  box-shadow:4px 5px 0 var(--color-paper),7px 9px 0 var(--color-ink);
   font-family:var(--font-ui);
-  font-size:9px;
-  font-weight:1000;
-  letter-spacing:.13em;
-  transform:skew(-8deg) rotate(1deg);
-}
-
-.brand-channel span,
-.brand-channel b,
-.brand-channel i {
-  display:block;
-  padding:4px 8px;
-}
-
-.brand-channel i {
-  color:var(--color-ink);
-  background:var(--color-paper);
+  font-size:12px;
   font-style:normal;
-  letter-spacing:-.05em;
+  font-weight:1000;
+  line-height:1;
+  letter-spacing:0;
+  text-shadow:none;
+  -webkit-text-stroke:0;
+  filter:none;
+  transform:none;
 }
 
-.brand-channel b {
-  color:var(--color-ink);
-  background:var(--color-green);
+.brand-lockup h1 .brand-spark {
+  position:absolute;
+  z-index:8;
+  right:21px;
+  top:27px;
+  color:var(--color-paper);
+  font-size:24px;
+  font-style:normal;
+  line-height:1;
+  letter-spacing:0;
+  -webkit-text-stroke:0;
+  text-shadow:2px 2px 0 var(--color-ink);
+  filter:none;
+  transform:none;
 }
 
 .brand-lockup p {
   position:relative;
-  z-index:8;
-  margin:8px 0 0 88px;
-  color:var(--color-ink);
+  z-index:4;
+  width:max-content;
+  margin:3px 0 0 39px;
+  padding:3px 9px;
+  color:var(--color-paper);
+  background:var(--color-ink);
   font-family:var(--font-ui);
-  font-size:10px;
+  font-size:9px;
   font-weight:1000;
-  letter-spacing:.16em;
+  letter-spacing:.15em;
+  transform:rotate(-3deg) skewX(-5deg);
 }
 
-.theme-night .brand-lockup::before {
-  opacity:.08;
-  filter:invert(1);
-}
-
-.theme-night .brand-lockup p {
-  color:var(--night-text,var(--color-paper));
-}
-
-.theme-night .brand-lockup h1 .brand-signal,
-.theme-night .brand-lockup h1 .logo-art {
+.theme-night .brand-lockup h1 .brand-plane,
+.theme-night .brand-lockup h1 .logo-face {
   color:var(--color-paper);
 }
 
-.theme-night .brand-lockup h1 .logo-sword,
-.theme-night .brand-lockup h1 .brand-burst {
-  color:var(--color-ink);
+.theme-night .brand-lockup p {
+  color:var(--color-paper);
 }
 
-@keyframes brandSignalIn {
-  from { opacity:0; transform:scale(.72) rotate(-12deg); }
-}
-
-@keyframes brandWordIn {
-  from { opacity:0; transform:translateX(-28px) skew(-13deg) rotate(-5deg); }
+@keyframes logoPlaneIn {
+  from {
+    opacity:0;
+    transform:perspective(760px) translate3d(-28px,18px,-90px) rotateY(-10deg) rotateZ(-7deg) skewX(-4deg) scale(.93);
+  }
+  to {
+    opacity:1;
+    transform:var(--logo-plane);
+  }
 }
 
 @media (max-width:760px) {
@@ -304,10 +241,10 @@
   }
 
   .brand-lockup {
-    width:448px;
+    width:470px;
     min-width:0;
-    transform:scale(.63) rotate(-1deg);
-    transform-origin:left center;
+    transform:scale(.61);
+    transform-origin:left top;
   }
 
   .hero .add-task {
@@ -318,11 +255,7 @@
 }
 
 @media (prefers-reduced-motion:reduce) {
-  .brand-lockup h1 .brand-signal,
-  .brand-lockup h1 .logo-sword,
-  .brand-lockup h1 .logo-art,
-  .brand-lockup h1 strong,
-  .brand-lockup h1 .brand-burst {
+  .brand-lockup h1 .brand-plane {
     animation:none;
   }
 }

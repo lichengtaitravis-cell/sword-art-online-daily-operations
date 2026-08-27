@@ -1,0 +1,12 @@
+{
+  "references": [
+    { "file": "01-revival-key-art.png", "sha256": "8abf74851a617b627b685bef210f9260c4fd76493f682165f0d45c8c4c69aaf1" },
+    { "file": "02-golden-logo-lockup.png", "sha256": "db8da4ade816ea150d29d76a089b3722d89845f8123950ca137c7adf38741769" },
+    { "file": "03-revival-logo-perspective.png", "sha256": "bd08ab4597c8e3f76b1a21ff150ea9982856427909a758d85e82f766658fdc9e" },
+    { "file": "04-golden-animation-poster.png", "sha256": "3ed90de60b9827bcebbaf262527d2886acf7457a95ac01f39357e4bd8d53d1f0" },
+    { "file": "05-golden-rainbow-composition.png", "sha256": "94f9be935b8c8445e9259f007bba3a610357a3642017f9e714a80098c097d025" },
+    { "file": "06-tv-frame-logo.png", "sha256": "23a01942e26198c2cc9218d80a48e70746c5bfc18ea70f4be3f949f9d104711e" },
+    { "file": "07-golden-ensemble.png", "sha256": "7a06825b393692a58ab9edcff587a209154ec106882ce64813cd03674746f36b" },
+    { "file": "08-revival-digital-premium.png", "sha256": "599b3a6154a7dc3585c605f98bc9444ddfd3687cb6c6948ddf7f8b8e54a095ce" }
+  ]
+}
