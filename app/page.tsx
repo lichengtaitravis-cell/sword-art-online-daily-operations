@@ -42,6 +42,7 @@ type PlannerSettings = {
   locations: { value: string; custom?: boolean }[];
   defaultTaskType: string;
   defaultLocation: string;
+  recurrenceEnabled: boolean;
 };
 
 const BASE_TYPES: PlannerSettings['taskTypes'] = [
@@ -51,7 +52,7 @@ const BASE_TYPES: PlannerSettings['taskTypes'] = [
   ...['🏃‍➡️ 运动', '🧘 冥想', '🎈 聚会', '🎮 娱乐', '🛏️ 休息'].map((value) => ({ value, color: 'yellow' as const })),
 ];
 const BASE_LOCATIONS = ['🏠 家', '🏢 公司', '🏫 学校', '💻 线上', '🏃 户外', '✈️ 机场', '🚉 车站', '🛒 超市', '📍 其他'].map((value) => ({ value }));
-const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家' };
+const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家', recurrenceEnabled: true };
 const TASK_KEY = 'sao-planner-tasks-v2';
 const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
 const SETTINGS_KEY = 'sao-planner-settings-v1';
@@ -74,10 +75,12 @@ function sortedTaskTypes(taskTypes: PlannerSettings['taskTypes']) {
 function normalizeSettings(raw: Partial<PlannerSettings> | null | undefined): PlannerSettings {
   const merged = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
   return {
-    ...merged,
     username: typeof merged.username === 'string' && merged.username.trim() ? merged.username.trim() : DEFAULT_SETTINGS.username,
     taskTypes: sortedTaskTypes(Array.isArray(merged.taskTypes) ? merged.taskTypes : BASE_TYPES),
     locations: Array.isArray(merged.locations) ? merged.locations : BASE_LOCATIONS,
+    defaultTaskType: typeof merged.defaultTaskType === 'string' ? merged.defaultTaskType : DEFAULT_SETTINGS.defaultTaskType,
+    defaultLocation: typeof merged.defaultLocation === 'string' ? merged.defaultLocation : DEFAULT_SETTINGS.defaultLocation,
+    recurrenceEnabled: merged.recurrenceEnabled !== false,
   };
 }
 
@@ -171,7 +174,8 @@ function shouldGenerate(task: Task, now: Date) {
   return false;
 }
 
-function processRecurring(tasks: Task[]) {
+function processRecurring(tasks: Task[], enabled = true) {
+  if (!enabled) return tasks;
   const now = new Date();
   const today = localDateKey(now);
   let nextIndex = tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1;
@@ -222,6 +226,25 @@ function recurrenceLabel(task: Task) {
   if (task.recurrence === 'daily') return '每天';
   if (task.recurrence === 'weekdays') return '工作日';
   return `每周 · ${task.recurrenceDays.map((day) => `周${WEEKDAYS[day]}`).join(' / ')}`;
+}
+
+function descriptionToText(value: string) {
+  return value
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p>|<\/div>|<\/li>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function descriptionMarkup(value: string) {
+  if (/<[a-z][\s\S]*>/i.test(value)) return value;
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
 }
 
 function taskScheduleRange(task: Task, referenceNow = new Date()) {
@@ -440,6 +463,79 @@ function ArchiveFilterMenu({ label, mark, value, options, onChange }: {
   </div>;
 }
 
+function ArchiveDateFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() => value ? new Date(`${value}T00:00:00`) : new Date());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const days = useMemo(() => {
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+    return Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; });
+  }, [month]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeOnEscape); };
+  }, [open]);
+
+  const openPicker = () => {
+    if (value) setMonth(new Date(`${value}T00:00:00`));
+    setOpen((current) => !current);
+  };
+  return <div className={`archive-filter archive-date-filter ${open ? 'is-open' : ''}`} ref={rootRef}>
+    <span>DAILY FLOW DATE</span>
+    <button type="button" className="archive-filter-trigger" aria-haspopup="dialog" aria-expanded={open} onClick={openPicker}>
+      <i aria-hidden="true">▣</i><strong>{value ? value.replaceAll('-', ' / ') : '全部行动日 / ALL DAYS'}</strong><em aria-hidden="true">⌄</em>
+    </button>
+    {open && <section className="archive-date-menu" role="dialog" aria-label="按 DAILY FLOW 日期筛选">
+      <header><button type="button" aria-label="上个月" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button><strong>{month.getFullYear()} / {String(month.getMonth() + 1).padStart(2, '0')}</strong><button type="button" aria-label="下个月" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button></header>
+      <div className="archive-date-weekdays">{WEEKDAYS.map((day) => <span key={day}>周{day}</span>)}</div>
+      <div className="archive-date-days">{days.map((day) => {
+        const key = localDateKey(day);
+        return <button type="button" key={key} className={`${day.getMonth() !== month.getMonth() ? 'outside' : ''} ${key === value ? 'active' : ''} ${key === localDateKey(new Date()) ? 'today' : ''}`} onClick={() => { onChange(key); setOpen(false); }}>{day.getDate()}</button>;
+      })}</div>
+      <footer><span>按 DAILY FLOW 的任务分配筛选</span><button type="button" onClick={() => { onChange(''); setOpen(false); }}>CLEAR / 清除</button></footer>
+    </section>}
+  </div>;
+}
+
+function RichTextDescription({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== descriptionMarkup(value)) editorRef.current.innerHTML = descriptionMarkup(value);
+  }, [value]);
+  const rememberSelection = () => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount || !editorRef.current?.contains(selection.anchorNode)) return;
+    selectionRef.current = selection.getRangeAt(0).cloneRange();
+  };
+  const format = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList' | 'insertOrderedList') => {
+    editorRef.current?.focus();
+    const selection = window.getSelection();
+    if (selectionRef.current && selection) {
+      selection.removeAllRanges();
+      selection.addRange(selectionRef.current);
+    }
+    document.execCommand(command);
+    rememberSelection();
+    onChange(editorRef.current?.innerHTML ?? '');
+  };
+  return <div className="field field-wide rich-description-field"><span>Description / 描述</span><div className="rich-text-toolbar" role="toolbar" aria-label="描述文字格式">
+    <button type="button" title="加粗" aria-label="加粗" onMouseDown={(event) => event.preventDefault()} onClick={() => format('bold')}><b>B</b></button>
+    <button type="button" title="斜体" aria-label="斜体" onMouseDown={(event) => event.preventDefault()} onClick={() => format('italic')}><i>I</i></button>
+    <button type="button" title="下划线" aria-label="下划线" onMouseDown={(event) => event.preventDefault()} onClick={() => format('underline')}><u>U</u></button>
+    <span aria-hidden="true" />
+    <button type="button" title="项目符号" aria-label="项目符号" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertUnorderedList')}>• ≡</button>
+    <button type="button" title="编号列表" aria-label="编号列表" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertOrderedList')}>1 ≡</button>
+  </div><div ref={editorRef} className="rich-description-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="补充任务背景、完成标准或下一步…" onFocus={rememberSelection} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onInput={() => { rememberSelection(); onChange(editorRef.current?.innerHTML ?? ''); }} /></div>;
+}
+
 function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragStart, onDragEnd, onDragOver, onDrop }: {
   task: Task; color: TypeColor; now: Date; dragging: boolean; landed: boolean; onOpen: () => void;
   onStart: () => void;
@@ -453,7 +549,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     <div className="card-stripe" />
     <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon">↻</span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
     <h3>{task.title}</h3>
-    <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{task.description || '\u00a0'}</p>
+    <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{descriptionToText(task.description) || '\u00a0'}</p>
     {task.status === 'inProgress' && <span className="mission-state-signal" aria-hidden="true">LIVE</span>}
     {task.status === 'completed' && <span className="mission-state-signal" aria-hidden="true">CLEAR</span>}
     {urgency && <div className={`start-countdown urgency-${urgency}`} role={urgency === 'overdue' || urgency === 'finalTen' ? 'alert' : 'status'}><div><span>{startUrgencyLabel(urgency)}</span><strong>{countdownText(task, now)}</strong><small>{formatTime(task.startedAt, false)} START</small></div><button type="button" onClick={(event) => { event.stopPropagation(); onStart(); }}>▶ ENGAGE</button></div>}
@@ -505,12 +601,14 @@ export default function Home() {
   const [tableStatus, setTableStatus] = useState<Status | 'all'>('all');
   const [tableType, setTableType] = useState('all');
   const [tablePriority, setTablePriority] = useState<Priority | 'all'>('all');
+  const [tableDate, setTableDate] = useState('');
   const [calendarMonth, setCalendarMonth] = useState(() => { const date = new Date(); date.setDate(1); return date; });
   const [selectedDay, setSelectedDay] = useState(localDateKey(new Date()));
   const [dayAgendaOpen, setDayAgendaOpen] = useState(false);
   const [customType, setCustomType] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
+  const [repeatersExpanded, setRepeatersExpanded] = useState(true);
 
   useEffect(() => {
     const savedView = window.sessionStorage.getItem(VIEW_SESSION_KEY);
@@ -559,7 +657,7 @@ export default function Home() {
           const savedTheme = localStorage.getItem(THEME_KEY);
           const importedSettings = normalizeSettings(savedSettings ? JSON.parse(savedSettings) : null);
           const importedTheme = savedTheme === 'night' ? 'night' : 'day';
-          const importedTasks = processRecurring(savedTasks ? normalizeTasks(JSON.parse(savedTasks)) : seedTasks());
+          const importedTasks = processRecurring(savedTasks ? normalizeTasks(JSON.parse(savedTasks)) : seedTasks(), importedSettings.recurrenceEnabled);
           const imported = await savePlannerState<Task, PlannerSettings>({
             expectedRevision: databaseState.revision,
             tasks: importedTasks,
@@ -577,7 +675,7 @@ export default function Home() {
         if (cancelled) return;
         const normalizedSettings = normalizeSettings(databaseState.settings);
         const normalizedTasks = normalizeTasks(databaseState.tasks);
-        const recurringTasks = processRecurring(normalizedTasks);
+        const recurringTasks = processRecurring(normalizedTasks, normalizedSettings.recurrenceEnabled);
         databaseRevision.current = databaseState.revision;
         lastPersistedSnapshot.current = JSON.stringify({
           tasks: normalizedTasks,
@@ -630,7 +728,7 @@ export default function Home() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [tasks, settings, theme, hydrated, saveRetry]);
-  useEffect(() => { const interval = window.setInterval(() => setTasks((current) => processRecurring(current)), 60_000); return () => window.clearInterval(interval); }, []);
+  useEffect(() => { const interval = window.setInterval(() => setTasks((current) => processRecurring(current, settings.recurrenceEnabled)), 60_000); return () => window.clearInterval(interval); }, [settings.recurrenceEnabled]);
   useEffect(() => { const interval = window.setInterval(() => setClock(new Date()), 1_000); return () => window.clearInterval(interval); }, []);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2200); return () => window.clearTimeout(timer); }, [toast]);
   useEffect(() => {
@@ -670,19 +768,30 @@ export default function Home() {
     return result;
   }, {} as Record<Status, Task[]>), [tasks, showCompletedHistory]);
 
+  const activeRecurringTasks = useMemo(() => {
+    const activeSeries = new Map<string, Task>();
+    tasks.filter((task) => task.recurrence !== 'none').forEach((task) => {
+      const seriesKey = task.seriesId || task.id;
+      const current = activeSeries.get(seriesKey);
+      if (!current || task.seriesHead || (!current.seriesHead && task.index > current.index)) activeSeries.set(seriesKey, task);
+    });
+    return [...activeSeries.values()].sort((a, b) => a.index - b.index);
+  }, [tasks]);
+
   const filteredTable = useMemo(() => tasks.filter((task) => {
     const query = tableQuery.trim().toLowerCase();
     return (!query || `${task.title} ${task.description} ${task.taskType} ${task.location}`.toLowerCase().includes(query))
       && (tableStatus === 'all' || task.status === tableStatus)
       && (tableType === 'all' || task.taskType === tableType)
-      && (tablePriority === 'all' || task.priority === tablePriority);
+      && (tablePriority === 'all' || task.priority === tablePriority)
+      && (!tableDate || taskOccursInActionDay(task, tableDate, clock));
   }).sort((a, b) => {
     const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
     if (statusDiff) return statusDiff;
     if (Boolean(a.dueAt) !== Boolean(b.dueAt)) return a.dueAt ? -1 : 1;
     if (a.dueAt && b.dueAt) return +new Date(a.dueAt) - +new Date(b.dueAt);
     return b.index - a.index;
-  }), [tasks, tableQuery, tableStatus, tableType, tablePriority]);
+  }), [tasks, tableQuery, tableStatus, tableType, tablePriority, tableDate, clock]);
 
   const calendarDays = useMemo(() => {
     const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -775,6 +884,11 @@ export default function Home() {
   };
 
   const openNewTask = (status: Status = 'pending', dueAt = '') => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), status, dueAt });
+  const openNewRecurringTask = () => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), recurrence: 'daily', recurrenceDays: [new Date().getDay()], seriesHead: true });
+  const stopRecurringTask = (seriesId: string) => {
+    setTasks((current) => current.map((task) => task.seriesId === seriesId ? { ...task, recurrence: 'none', seriesHead: false } : task));
+    setToast('循环任务已关闭');
+  };
 
   const openDatePicker = (field: DateFieldName) => {
     if (!draft) return;
@@ -903,8 +1017,9 @@ export default function Home() {
         <ArchiveFilterMenu label="STATUS" mark="◈" value={tableStatus} onChange={(value) => setTableStatus(value as Status | 'all')} options={[{ value: 'all', label: '全部状态 / ALL' }, { value: 'inProgress', label: 'IN PROGRESS / 进行中' }, { value: 'pending', label: 'PENDING / 待处理' }, { value: 'completed', label: 'COMPLETED / 已完成' }]} />
         <ArchiveFilterMenu label="TYPE" mark="▦" value={tableType} onChange={setTableType} options={[{ value: 'all', label: '全部类型 / ALL' }, ...sortedTaskTypes(settings.taskTypes).map((type) => ({ value: type.value, label: type.value, tone: type.color }))]} />
         <ArchiveFilterMenu label="PRIORITY" mark="!" value={tablePriority} onChange={(value) => setTablePriority(value as Priority | 'all')} options={[{ value: 'all', label: '全部优先级 / ALL' }, { value: 'must', label: 'MUST / 必须', tone: 'must' }, { value: 'high', label: 'HIGH / 高', tone: 'high' }, { value: 'medium', label: 'MID / 中', tone: 'medium' }, { value: 'low', label: 'LOW / 低', tone: 'low' }]} />
+        <ArchiveDateFilter value={tableDate} onChange={setTableDate} />
       </div>
-      <div className="archive-table-wrap"><table className="archive-table"><thead><tr><th>INDEX</th><th>任务名称</th><th>任务描述</th><th>状态</th><th>任务类型</th><th>优先级</th><th>截止时间</th><th>开始时间</th><th>完成时间</th><th>地点</th></tr></thead><tbody>{filteredTable.map((task, rowIndex) => <tr key={task.id} onClick={() => setDraft(task)}><td className="table-index">{rowIndex + 1}</td><td><strong>{task.title}</strong>{task.recurrence !== 'none' && <span className="table-repeat">↻</span>}</td><td className="description-data">{task.description || '—'}</td><td><span className={`status-chip status-${task.status}`}>{statusLabel(task.status)}</span></td><td><span className={`type-chip type-${typeColor(task.taskType, settings)}`}><i />{task.taskType}</span></td><td><span className={`priority-chip priority-${task.priority}`}>{task.priority === 'must' ? 'MUST' : task.priority.toUpperCase()}</span></td><td className="time-data">{formatTime(task.dueAt)}</td><td className="time-data">{formatTime(task.startedAt)}</td><td className="time-data">{formatTime(task.completedAt)}</td><td>{task.location}</td></tr>)}</tbody></table>{!filteredTable.length && <div className="no-results">NO MATCHING MISSIONS / 没有匹配任务</div>}</div>
+      <div className="archive-table-wrap"><table className="archive-table"><thead><tr><th>INDEX</th><th>任务名称</th><th>任务描述</th><th>状态</th><th>任务类型</th><th>优先级</th><th>截止时间</th><th>开始时间</th><th>完成时间</th><th>地点</th></tr></thead><tbody>{filteredTable.map((task, rowIndex) => <tr key={task.id} onClick={() => setDraft(task)}><td className="table-index">{rowIndex + 1}</td><td><strong>{task.title}</strong>{task.recurrence !== 'none' && <span className="table-repeat">↻</span>}</td><td className="description-data">{descriptionToText(task.description) || '—'}</td><td><span className={`status-chip status-${task.status}`}>{statusLabel(task.status)}</span></td><td><span className={`type-chip type-${typeColor(task.taskType, settings)}`}><i />{task.taskType}</span></td><td><span className={`priority-chip priority-${task.priority}`}>{task.priority === 'must' ? 'MUST' : task.priority.toUpperCase()}</span></td><td className="time-data">{formatTime(task.dueAt)}</td><td className="time-data">{formatTime(task.startedAt)}</td><td className="time-data">{formatTime(task.completedAt)}</td><td>{task.location}</td></tr>)}</tbody></table>{!filteredTable.length && <div className="no-results">NO MATCHING MISSIONS / 没有匹配任务</div>}</div>
       <p className="sort-note">INDEX 是当前筛选结果的行号；默认先按状态排列，同状态任务再按截止时间排列。</p>
     </section>}
 
@@ -921,6 +1036,21 @@ export default function Home() {
       <header className="page-banner"><span>04</span><div><p>PERSONAL OPERATION RULES</p><h2>DESIGN</h2></div><strong>AUTO-SAVED</strong></header>
       <div className="settings-grid"><section className="settings-panel profile-panel"><header><span>00</span><div><h3>PLAYER IDENTITY</h3><p>同步更新标题上方与主菜单中的用户名</p></div></header><div className="profile-console"><div className="profile-badge"><span>ACTIVE PLAYER</span><strong>{settings.username}</strong><small>SWORD ART ONLINE · LOCAL PROFILE</small></div><label><span>USERNAME / 用户名</span><input maxLength={32} value={settings.username} onChange={(event) => setSettings({ ...settings, username: event.target.value })} onBlur={() => setSettings((current) => ({ ...current, username: current.username.trim() || DEFAULT_SETTINGS.username }))} placeholder="输入用户名" /><small>最多 32 个字符，修改后自动保存到本地 SQLite。</small></label></div></section><section className="settings-panel loadout-studio"><header><span>01</span><div><h3>NEW MISSION DEFAULTS</h3><p>只决定新建任务时自动填入的内容</p></div></header><div className="loadout-console"><div className={`loadout-preview type-${typeColor(settings.defaultTaskType, settings)}`}><span>PREVIEW</span><strong>下一项新任务</strong><p>{settings.defaultTaskType}</p><small>{settings.defaultLocation} · 中优先级</small></div><div className="loadout-controls"><label><span>TASK TYPE / 默认类型</span><select value={settings.defaultTaskType} onChange={(event) => setSettings({ ...settings, defaultTaskType: event.target.value })}>{sortedTaskTypes(settings.taskTypes).map((type) => <option key={type.value}>{type.value}</option>)}</select></label><label><span>LOCATION / 默认地点</span><select value={settings.defaultLocation} onChange={(event) => setSettings({ ...settings, defaultLocation: event.target.value })}>{settings.locations.map((location) => <option key={location.value}>{location.value}</option>)}</select></label><p>优先级不设默认偏好，新任务统一从“中”开始，随后可在任务详情里调整。</p></div></div></section>
         <section className="settings-panel custom-panel"><header><span>02</span><div><h3>OPTION WORKSHOP</h3><p>扩充你的任务词库</p></div></header><div className="workshop-body"><form onSubmit={(event) => { event.preventDefault(); if (!customType.trim()) return; setSettings({ ...settings, taskTypes: sortedTaskTypes([...settings.taskTypes, { value: customType.trim(), color: customTypeColor, custom: true }]) }); setCustomType(''); }}><label><span>新增任务类型</span><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="例如：🎵 音乐" /></label><div className="color-choices">{(['purple', 'blue', 'green', 'yellow'] as TypeColor[]).map((color) => <button type="button" aria-label={color} className={`${color} ${customTypeColor === color ? 'active' : ''}`} key={color} onClick={() => setCustomTypeColor(color)} />)}</div><button className="settings-add">＋ 添加类型</button></form><form onSubmit={(event) => { event.preventDefault(); if (!customLocation.trim()) return; setSettings({ ...settings, locations: [...settings.locations, { value: customLocation.trim(), custom: true }] }); setCustomLocation(''); }}><label><span>新增地点</span><input value={customLocation} onChange={(e) => setCustomLocation(e.target.value)} placeholder="例如：☕ 咖啡店" /></label><button className="settings-add">＋ 添加地点</button></form></div><div className="custom-list">{sortedTaskTypes(settings.taskTypes).filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, taskTypes: settings.taskTypes.filter((type) => type.value !== item.value), defaultTaskType: settings.defaultTaskType === item.value ? '🧬 个人' : settings.defaultTaskType })}>{item.value}<span>×</span></button>)}{settings.locations.filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, locations: settings.locations.filter((location) => location.value !== item.value), defaultLocation: settings.defaultLocation === item.value ? '🏠 家' : settings.defaultLocation })}>{item.value}<span>×</span></button>)}</div></section>
+        <section className="settings-panel recurrence-control-panel">
+          <header><span>03</span><div><h3>REPEAT CONTROL</h3><p>循环任务的总控与活动队列</p></div><strong>{activeRecurringTasks.length} ACTIVE</strong></header>
+          <div className="repeat-control-grid">
+            <section className="repeat-master-card">
+              <span>MASTER CONTROL / 总开关</span>
+              <label className="recurrence-switch"><input type="checkbox" checked={settings.recurrenceEnabled} onChange={(event) => setSettings({ ...settings, recurrenceEnabled: event.target.checked })} /><span><i /></span><strong>{settings.recurrenceEnabled ? 'AUTO-GENERATE ON' : 'AUTO-GENERATE PAUSED'}</strong></label>
+              <p>{settings.recurrenceEnabled ? '系统会根据每个循环任务自己的规则生成下一项 Pending 任务。' : '自动生成已暂停；已有循环规则仍保留，可继续编辑或单独关闭。'}</p>
+              <small>新任务默认不循环。需要循环时，请在任务详情的 Repeat / 循环中单独设置。</small>
+            </section>
+            <section className="repeat-roster">
+              <header><div><span>ACTIVE REPEATERS</span><strong>{activeRecurringTasks.length} 个循环任务</strong></div><div className="repeat-roster-actions"><button type="button" className="add-repeater" onClick={openNewRecurringTask}>＋ 添加循环任务</button>{activeRecurringTasks.length > 0 && <button type="button" className="toggle-repeaters" aria-expanded={repeatersExpanded} aria-controls="active-repeaters-list" onClick={() => setRepeatersExpanded((current) => !current)}>{repeatersExpanded ? '收起 ↑' : '展开 ↓'}</button>}</div></header>
+              {repeatersExpanded && (activeRecurringTasks.length ? <div className="recurrence-series-list" id="active-repeaters-list">{activeRecurringTasks.map((task) => <article key={task.id} className={`recurrence-series-item status-${task.status}`}><i aria-hidden="true">↻</i><div><strong>{task.title}</strong><span>{recurrenceLabel(task)} · {statusLabel(task.status)} · {task.dueAt ? `截止 ${formatTime(task.dueAt)}` : '未设置截止'}</span></div><button type="button" onClick={() => setDraft(task)}>编辑</button><button type="button" className="stop-repeat" onClick={() => stopRecurringTask(task.seriesId)}>关闭循环</button></article>)}</div> : <div className="recurrence-empty"><strong>NO ACTIVE LOOPS</strong><span>尚无循环任务。创建后会在这里持续显示。</span></div>)}
+            </section>
+          </div>
+        </section>
       </div>
     </section>}
 
@@ -946,7 +1076,7 @@ export default function Home() {
 
     {draft && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDraft(null); }}><form className="task-modal" onSubmit={saveDraft} role="dialog" aria-modal="true" aria-labelledby="task-dialog-title">
       <header className={`modal-header type-${typeColor(draft.taskType, settings)}`}><div><span>MISSION DATA</span><h2 id="task-dialog-title">任务详情</h2></div><button type="button" className="close-button" aria-label="关闭" onClick={() => setDraft(null)}>×</button></header>
-      <div className="modal-body"><label className="field field-wide"><span>Title / 标题</span><input autoFocus value={draft.title} placeholder="这次要攻略什么？" onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label><label className="field field-wide"><span>Description / 描述</span><textarea value={draft.description} placeholder="补充任务背景、完成标准或下一步…" onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></label>
+      <div className="modal-body"><label className="field field-wide"><span>Title / 标题</span><input autoFocus value={draft.title} placeholder="这次要攻略什么？" onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label><RichTextDescription value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
         <div className="form-grid"><ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} /><ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label="Start / 开始时间" value={draft.startedAt} onClick={() => openDatePicker('startedAt')} /><DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} /><DateChoice label="Deadline / 截止时间" value={draft.dueAt} onClick={() => openDatePicker('dueAt')} /><ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
         {draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
         {draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 到达循环日后会生成新的 Pending 任务；已完成的历史任务会完整保留在 Completed。</p>}
