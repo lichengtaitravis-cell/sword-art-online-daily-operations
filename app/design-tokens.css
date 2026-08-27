@@ -22,10 +22,11 @@
   --color-line:#d4cfb5;
 
   /* Typography */
+  --font-cjk:'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC','Noto Sans SC',sans-serif;
   --font-logo:Baskerville,'Baskerville Old Face','Iowan Old Style','Times New Roman',serif;
-  --font-display:'Arial Black','Avenir Next Condensed','Helvetica Neue',Arial,'Noto Sans SC',sans-serif;
-  --font-ui:'Avenir Next Condensed','Arial Narrow','Roboto Condensed','Helvetica Neue','PingFang SC','Noto Sans SC',sans-serif;
-  --font-body:Arial,'Noto Sans SC','PingFang SC',sans-serif;
+  --font-display:'Arial Black','Avenir Next Condensed','Helvetica Neue',Arial,var(--font-cjk);
+  --font-ui:'Avenir Next Condensed','Arial Narrow','Roboto Condensed','Helvetica Neue',var(--font-cjk);
+  --font-body:'Helvetica Neue',Arial,var(--font-cjk);
 
   /* Shape and elevation */
   --line-thin:2px;

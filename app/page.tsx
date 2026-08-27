@@ -12,6 +12,7 @@ type ChoiceFieldName = 'status' | 'priority' | 'taskType' | 'location' | 'recurr
 type DateFieldName = 'startedAt' | 'completedAt' | 'dueAt';
 type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
 type StartUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinute' | 'finalTen' | 'overdue';
+type ArchiveFilterOption = { value: string; label: string; tone?: string };
 
 type Task = {
   id: string;
@@ -53,7 +54,8 @@ const TASK_KEY = 'sao-planner-tasks-v2';
 const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
 const SETTINGS_KEY = 'sao-planner-settings-v1';
 const THEME_KEY = 'sao-planner-theme-v1';
-const VISIBLE_LIMIT: Record<Status, number> = { pending: 7, inProgress: 7, completed: 7 };
+const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
+const VISIBLE_LIMIT: Record<Status, number> = { pending: 5, inProgress: 5, completed: 5 };
 const STATUS_ORDER: Record<Status, number> = { inProgress: 0, pending: 1, completed: 2 };
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const TYPE_COLOR_ORDER: Record<TypeColor, number> = { purple: 0, blue: 1, green: 2, yellow: 3 };
@@ -261,6 +263,43 @@ function DateChoice({ label, value, onClick }: { label: string; value: string; o
   return <button type="button" className="choice-field date-choice" onClick={onClick}><span>{label}</span><strong>{value ? formatTime(value) : '未设置'}</strong><i>◷</i></button>;
 }
 
+function ArchiveFilterMenu({ label, mark, value, options, onChange }: {
+  label: string; mark: string; value: string; options: ArchiveFilterOption[]; onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  return <div className={`archive-filter ${open ? 'is-open' : ''}`} ref={rootRef}>
+    <span>{label}</span>
+    <button type="button" className="archive-filter-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      <i aria-hidden="true">{mark}</i><strong>{selected.label}</strong><em aria-hidden="true">⌄</em>
+    </button>
+    {open && <div className="archive-filter-menu" role="listbox" aria-label={`${label} 筛选`}>
+      <small>SELECT / 选择</small>
+      {options.map((option, index) => <button type="button" role="option" aria-selected={option.value === value} className={`archive-filter-option ${option.value === value ? 'active' : ''} ${option.tone ? `tone-${option.tone}` : ''}`} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>
+        <span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i aria-hidden="true">{option.value === value ? '◆' : '›'}</i>
+      </button>)}
+    </div>}
+  </div>;
+}
+
 function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragStart, onDragEnd, onDragOver, onDrop }: {
   task: Task; color: TypeColor; now: Date; dragging: boolean; landed: boolean; onOpen: () => void;
   onStart: () => void;
@@ -269,13 +308,15 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
 }) {
   const canDrag = task.status !== 'completed';
   const urgency = startUrgency(task, now);
-  return <article className={`task-card type-${color} priority-${task.priority} ${urgency ? `start-${urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''} ${canDrag ? '' : 'is-locked'}`}
+  return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${urgency ? `has-start-countdown start-${urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''} ${canDrag ? '' : 'is-locked'}`}
     draggable={canDrag} tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
     <div className="card-stripe" />
     <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon">↻</span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
     <h3>{task.title}</h3>
-    {task.description && <p className="card-description">{task.description}</p>}
+    <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{task.description || '\u00a0'}</p>
+    {task.status === 'inProgress' && <span className="mission-state-signal" aria-hidden="true">LIVE</span>}
+    {task.status === 'completed' && <span className="mission-state-signal" aria-hidden="true">CLEAR</span>}
     {urgency && <div className={`start-countdown urgency-${urgency}`} role={urgency === 'overdue' || urgency === 'finalTen' ? 'alert' : 'status'}><div><span>{startUrgencyLabel(urgency)}</span><strong>{countdownText(task, now)}</strong><small>{formatTime(task.startedAt, false)} START</small></div><button type="button" onClick={(event) => { event.stopPropagation(); onStart(); }}>▶ ENGAGE</button></div>}
     <div className="card-meta"><span>{task.location}</span>
       {task.status === 'pending' && <span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span>}
@@ -299,7 +340,12 @@ export default function Home() {
   const startReminderBands = useRef(new Map<string, StartUrgency>());
   const startRemindersReady = useRef(false);
   const [view, setView] = useState<View>('board');
+  const [viewRestored, setViewRestored] = useState(false);
+  const [introVisible, setIntroVisible] = useState(false);
+  const [introMinimumMet, setIntroMinimumMet] = useState(false);
+  const [introProgress, setIntroProgress] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuClosing, setMenuClosing] = useState(false);
   const [theme, setTheme] = useState<'day' | 'night'>('day');
   const [pageMotion, setPageMotion] = useState<'idle' | 'exit' | 'enter'>('idle');
   const [pageDirection, setPageDirection] = useState<'forward' | 'backward'>('forward');
@@ -326,6 +372,39 @@ export default function Home() {
   const [customType, setCustomType] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
+
+  useEffect(() => {
+    const savedView = window.sessionStorage.getItem(VIEW_SESSION_KEY);
+    const restoredView = navItems.some((item) => item.id === savedView) ? savedView as View : navItems[0].id;
+    const timers = [window.setTimeout(() => {
+      setView(restoredView);
+      setViewRestored(true);
+      if (restoredView === navItems[0].id) {
+        setIntroVisible(true);
+        setIntroProgress(8);
+      }
+    }, 0)];
+    if (restoredView === navItems[0].id) timers.push(
+      window.setTimeout(() => setIntroProgress(27), 260),
+      window.setTimeout(() => setIntroProgress(51), 620),
+      window.setTimeout(() => setIntroProgress(73), 1_020),
+      window.setTimeout(() => setIntroProgress(89), 1_430),
+      window.setTimeout(() => setIntroMinimumMet(true), 1_850),
+    );
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    window.sessionStorage.setItem(VIEW_SESSION_KEY, view);
+  }, [view, viewRestored]);
+
+  useEffect(() => {
+    if (!introVisible || !introMinimumMet || !hydrated) return;
+    const progressTimer = window.setTimeout(() => setIntroProgress(100), 0);
+    const finishTimer = window.setTimeout(() => setIntroVisible(false), 380);
+    return () => { window.clearTimeout(progressTimer); window.clearTimeout(finishTimer); };
+  }, [hydrated, introMinimumMet, introVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -585,13 +664,19 @@ export default function Home() {
 
   const choiceValue = draft && choiceField ? (choiceField === 'status' ? draft.status : choiceField === 'priority' ? draft.priority : choiceField === 'taskType' ? draft.taskType : choiceField === 'location' ? draft.location : draft.recurrence) : '';
   const [pickerHour = 0, pickerMinute = 0] = pickerTime ? pickerTime.split(':').map(Number) : [0, 0];
+  const closeMenu = () => {
+    if (!menuOpen) return;
+    setMenuOpen(false);
+    setMenuClosing(true);
+    window.setTimeout(() => setMenuClosing(false), 560);
+  };
   const navigateTo = (nextView: View) => {
-    if (nextView === view) { setMenuOpen(false); return; }
+    if (nextView === view) { closeMenu(); return; }
     const currentIndex = navItems.findIndex((item) => item.id === view);
     const nextIndex = navItems.findIndex((item) => item.id === nextView);
     setPageDirection(nextIndex > currentIndex ? 'forward' : 'backward');
     setPageMotion('exit');
-    setMenuOpen(false);
+    closeMenu();
     window.setTimeout(() => {
       setView(nextView);
       setPageMotion('enter');
@@ -608,21 +693,33 @@ export default function Home() {
   const activeStartUrgency = activeStartAlert ? startUrgency(activeStartAlert, now) : null;
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
+  if (!viewRestored) return <main className="app-shell boot-screen boot-prime" aria-label="正在准备界面" />;
+  if (introVisible) return <main className="app-shell opening-sequence" aria-label="Sword Art Online 启动画面">
+    <div className="opening-broadcast" aria-hidden="true"><span className="opening-antenna" /><span className="opening-screen"><i /><b>CH 04</b></span><span className="opening-controls"><i /><i /><b /></span></div>
+    <div className="opening-rays" aria-hidden="true" />
+    <section className="opening-copy">
+      <span>MIDNIGHT OPERATIONS NETWORK</span>
+      <strong>SWORD ART<br /><em>ONLINE</em></strong>
+      <p>DAILY MISSION SIGNAL · 本地作战频道</p>
+      <div className="opening-load"><i style={{ width: `${introProgress}%` }} /></div>
+      <small>{introProgress === 100 ? 'SIGNAL LOCKED · READY' : hydrated ? 'CALIBRATING CHANNEL' : 'LINKING LOCAL DATABASE'} <b>{String(introProgress).padStart(3, '0')}%</b></small>
+    </section>
+  </main>;
   if (!hydrated) return <main className="app-shell boot-screen"><div className="boot-mark"><span>CONNECTING SQLITE</span><strong>SWORD ART<br />ONLINE</strong><i /></div></main>;
 
   return <main className={`app-shell view-${view} theme-${theme} page-motion-${pageMotion} page-direction-${pageDirection}`}>
     <div className="tv-noise" aria-hidden="true" />
-    <div className="persona-fx" aria-hidden="true"><span className="fx-disc" /><span className="fx-rings" /><span className="fx-rainbow" /><span className="fx-dots" /><strong>MOVE! / TRUTH / NOW!</strong></div>
-    <button className={`menu-trigger ${menuOpen ? 'is-open' : ''}`} onClick={() => setMenuOpen((open) => !open)} aria-label="打开主菜单"><span /><span /><span /><strong>MENU</strong></button>
+    <div className="persona-fx" aria-hidden="true"><div className="background-tv"><span className="background-tv-antenna" /><span className="background-tv-screen"><i /><b>04</b></span><span className="background-tv-controls"><i /><i /><b /></span></div><span className="fx-rainbow" /><span className="fx-dots" /><strong>MOVE! / TRUTH / NOW!</strong></div>
+    <button className={`menu-trigger ${menuOpen ? 'is-open' : ''}`} onClick={() => { if (menuOpen) closeMenu(); else { setMenuClosing(false); setMenuOpen(true); } }} aria-label={menuOpen ? '关闭主菜单' : '打开主菜单'}><span /><span /><span /><strong>MENU</strong></button>
 
-    <aside className={`game-menu ${menuOpen ? 'is-open' : ''}`} aria-hidden={!menuOpen}>
-      <button className="menu-close" onClick={() => setMenuOpen(false)}>×</button>
+    <aside className={`game-menu ${menuOpen ? 'is-open' : ''} ${menuClosing ? 'is-closing' : ''}`} aria-hidden={!menuOpen}>
+      <button className="menu-close" onClick={closeMenu}>×</button>
       <div className="menu-title"><span>MAIN MENU</span><strong>SELECT<br />YOUR MOVE</strong><small>选择下一步行动</small></div>
       <nav>{navItems.map((item) => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => navigateTo(item.id)}><span className="menu-no">{item.no}</span><i>{item.mark}</i><div><strong>{item.title}</strong><small>{item.subtitle}</small></div><em>›</em></button>)}</nav>
       <footer><span>{settings.username}</span><i />SWORD ART ONLINE</footer>
       <button className={`theme-toggle theme-toggle-${theme}`} onClick={() => setTheme((current) => current === 'day' ? 'night' : 'day')}><span className="theme-orb"><i /><b /></span><strong>{theme === 'day' ? 'NIGHT MODE' : 'DAY MODE'}</strong><small>{theme === 'day' ? '夜间模式' : '白天模式'}</small></button>
     </aside>
-    {(menuOpen || pageMotion === 'exit') && <button className={`menu-scrim ${pageMotion === 'exit' ? 'is-closing' : ''}`} aria-label="关闭菜单" onClick={() => setMenuOpen(false)} />}
+    {(menuOpen || menuClosing) && <button className={`menu-scrim ${menuClosing ? 'is-closing' : ''}`} aria-label="关闭菜单" onClick={closeMenu} />}
 
     <header className="hero">
       <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} username={settings.username} />
@@ -655,9 +752,9 @@ export default function Home() {
     {view === 'table' && <section className="archive-page">
       <header className="page-banner"><span>02</span><div><p>COMPLETE MISSION DATABASE</p><h2>MISSION ARCHIVE</h2></div><strong>{filteredTable.length} RECORDS</strong></header>
       <div className="filter-deck"><label className="search-filter"><span>⌕</span><input value={tableQuery} onChange={(e) => setTableQuery(e.target.value)} placeholder="搜索标题、描述、类型或地点…" /></label>
-        <label><span>STATUS</span><select value={tableStatus} onChange={(e) => setTableStatus(e.target.value as Status | 'all')}><option value="all">全部状态</option><option value="inProgress">In Progress</option><option value="pending">Pending</option><option value="completed">Completed</option></select></label>
-        <label><span>TYPE</span><select value={tableType} onChange={(e) => setTableType(e.target.value)}><option value="all">全部类型</option>{sortedTaskTypes(settings.taskTypes).map((type) => <option key={type.value}>{type.value}</option>)}</select></label>
-        <label><span>PRIORITY</span><select value={tablePriority} onChange={(e) => setTablePriority(e.target.value as Priority | 'all')}><option value="all">全部优先级</option><option value="must">必</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>
+        <ArchiveFilterMenu label="STATUS" mark="◈" value={tableStatus} onChange={(value) => setTableStatus(value as Status | 'all')} options={[{ value: 'all', label: '全部状态 / ALL' }, { value: 'inProgress', label: 'IN PROGRESS / 进行中' }, { value: 'pending', label: 'PENDING / 待处理' }, { value: 'completed', label: 'COMPLETED / 已完成' }]} />
+        <ArchiveFilterMenu label="TYPE" mark="▦" value={tableType} onChange={setTableType} options={[{ value: 'all', label: '全部类型 / ALL' }, ...sortedTaskTypes(settings.taskTypes).map((type) => ({ value: type.value, label: type.value, tone: type.color }))]} />
+        <ArchiveFilterMenu label="PRIORITY" mark="!" value={tablePriority} onChange={(value) => setTablePriority(value as Priority | 'all')} options={[{ value: 'all', label: '全部优先级 / ALL' }, { value: 'must', label: 'MUST / 必须', tone: 'must' }, { value: 'high', label: 'HIGH / 高', tone: 'high' }, { value: 'medium', label: 'MID / 中', tone: 'medium' }, { value: 'low', label: 'LOW / 低', tone: 'low' }]} />
       </div>
       <div className="archive-table-wrap"><table className="archive-table"><thead><tr><th>INDEX</th><th>任务名称</th><th>任务描述</th><th>状态</th><th>任务类型</th><th>优先级</th><th>截止时间</th><th>开始时间</th><th>完成时间</th><th>地点</th></tr></thead><tbody>{filteredTable.map((task, rowIndex) => <tr key={task.id} onClick={() => setDraft(task)}><td className="table-index">{rowIndex + 1}</td><td><strong>{task.title}</strong>{task.recurrence !== 'none' && <span className="table-repeat">↻</span>}</td><td className="description-data">{task.description || '—'}</td><td><span className={`status-chip status-${task.status}`}>{statusLabel(task.status)}</span></td><td><span className={`type-chip type-${typeColor(task.taskType, settings)}`}><i />{task.taskType}</span></td><td><span className={`priority-chip priority-${task.priority}`}>{task.priority === 'must' ? 'MUST' : task.priority.toUpperCase()}</span></td><td className="time-data">{formatTime(task.dueAt)}</td><td className="time-data">{formatTime(task.startedAt)}</td><td className="time-data">{formatTime(task.completedAt)}</td><td>{task.location}</td></tr>)}</tbody></table>{!filteredTable.length && <div className="no-results">NO MATCHING MISSIONS / 没有匹配任务</div>}</div>
       <p className="sort-note">INDEX 是当前筛选结果的行号；默认先按状态排列，同状态任务再按截止时间排列。</p>

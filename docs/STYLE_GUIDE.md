@@ -88,12 +88,20 @@ Rules:
 
 ### Typography
 
+- **CJK foundation:** `--font-cjk`; keep one ordered Simplified Chinese fallback chain across the product so the same glyph does not change style between pages or components.
 - **Logo:** `--font-logo`; one high-contrast, heavy serif family across every title line. Perspective and italic energy come from the shared wordmark plane, not from mixing unrelated typefaces.
 - **Display:** `--font-display`; very heavy and slightly condensed. Use for page banners, results, and large counts outside the logo.
 - **Interface:** `--font-ui`; condensed, high-weight, tabular where useful. Use for buttons, status, chips, dates, and metadata.
 - **Body:** `--font-body`; normal proportions. Use for task descriptions, instructions, and longer Chinese copy.
 - Uppercase English labels may use `.08em–.16em` tracking. Do not apply wide tracking to Chinese body text.
+- Archive descriptions always use `--font-body` with normal letter spacing and a relaxed line height; headers, status blocks, and compact metadata use `--font-ui`.
 - Never mix serif and sans-serif faces inside the primary wordmark. Small operational metadata may use `--font-ui`, but it must remain subordinate.
+
+### Browser identity icon
+
+- The canonical bookmark/favicon artwork is `app/icon.png`, with the cache-busted browser asset at `public/sao-tv-icon-v2.png`: a yellow field carrying one black retro CRT television silhouette.
+- Preserve the TV body, antennas, controls, and screen as one readable mark with generous outer safe space. It must remain identifiable at 16 × 16 pixels.
+- The icon is separate from the in-page wordmark and must not contain title text, characters, rainbow stripes, or official Persona assets.
 
 ### Line, cut, and shadow
 
@@ -179,6 +187,8 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 - One category stripe and a compact priority badge.
 - High priority may increase border/shadow energy; it must not rely on color alone.
 - Keep title and status scan order consistent across board and archive views.
+- Do not recolor the complete card surface by workflow status. Pending, In Progress, and Completed retain the same paper/ink/category-color construction; motion, labels, timestamps, and a completed strike-through carry state.
+- Daily-board mission cards use one fixed standard height with reserved two-line title and description slots. A scheduled-start countdown is an absolutely positioned compact instrument overlay in the description zone: it is removed from layout flow and must never increase card height. Each board column shows five cards by default; additional cards remain behind the explicit reveal control.
 
 ### Badge and chip
 
@@ -191,6 +201,8 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 - Active choices may translate 6–12px and gain a yellow slab or ink shadow.
 - Menu rows should feel like broadcast lower-thirds: wide, flat, angled, and quickly readable.
 - Selection dialogs may be theatrical at entry, but option grids remain regular and keyboard navigable.
+- Archive filters use the shared custom selection menu instead of native browser dropdown chrome. Their trigger and option layer follow the ink/paper/yellow structure, angular cut, hard shadow, visible focus, outside-click close, and `Escape` close behavior.
+- Status remains structurally neutral. Type and priority colors may appear only as narrow option rails or compact signals; they must not recolor the complete filter surface.
 
 ### Form controls
 
@@ -214,6 +226,9 @@ Use the durations and easing variables from `app/design-tokens.css`.
 - Glitch: one or two displaced frames, 80–160ms total. Reserve for route changes, errors, or major result feedback.
 - Pop-in: scale from 0.85–0.95 with a small rotation; do not spring repeatedly.
 - CRT flash: a single luminance sweep under 200ms. Never flicker continuously.
+- The broad background uses one original black CRT television silhouette where the former circular turntable motif lived. A restrained spectrum strip may travel through or behind its screen as a signal accent; the TV itself remains black/ink.
+- Refreshing the first navigation tab may play one short broadcast-ident intro with a readable progress bar. Refreshing another tab restores that tab without replaying the intro.
+- The current tab is a session-scoped interface preference, not planner data; store it in `sessionStorage`, never in the SQLite task payload or the legacy `localStorage` migration keys.
 
 Every animation must have a meaningful static end state. Respect `prefers-reduced-motion`; remove transforms and flashes rather than merely slowing them down.
 
