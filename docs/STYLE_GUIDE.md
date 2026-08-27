@@ -189,6 +189,7 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 - Keep title and status scan order consistent across board and archive views.
 - Do not recolor the complete card surface by workflow status. Pending, In Progress, and Completed retain the same paper/ink/category-color construction; motion, labels, timestamps, and a completed strike-through carry state.
 - Daily-board mission cards use one fixed standard height with reserved two-line title and description slots. A scheduled-start countdown is an absolutely positioned compact instrument overlay in the description zone: it is removed from layout flow and must never increase card height. Each board column shows five cards by default; additional cards remain behind the explicit reveal control.
+- Completed cards remain draggable across workflow columns so an accidental completion can be corrected. Completion changes the card's state treatment, never its ability to move.
 
 ### Badge and chip
 
@@ -203,6 +204,13 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 - Selection dialogs may be theatrical at entry, but option grids remain regular and keyboard navigable.
 - Archive filters use the shared custom selection menu instead of native browser dropdown chrome. Their trigger and option layer follow the ink/paper/yellow structure, angular cut, hard shadow, visible focus, outside-click close, and `Escape` close behavior.
 - Status remains structurally neutral. Type and priority colors may appear only as narrow option rails or compact signals; they must not recolor the complete filter surface.
+- The filter trigger's yellow separator sits clearly left of the chevron rather than touching its glyph or the clipped outer edge.
+- Archive-table scrollbars are deliberate controls: square ink tracks, a high-contrast yellow drag thumb, hard borders, and distinct hover/active feedback. Avoid rounded operating-system-neutral styling on this surface.
+
+### Daily flow window
+
+- On desktop, the daily-flow window height follows the fixed 24-hour distribution panel. The adjacent agenda must scroll internally when its task list exceeds that height; list growth must never stretch the time map or create blank space beneath it.
+- On narrow screens, the two modules may stack inside one fixed viewport-height window, while each module preserves a bounded working height.
 
 ### Form controls
 

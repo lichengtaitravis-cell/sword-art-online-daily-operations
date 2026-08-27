@@ -306,10 +306,9 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
   onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDragEnd: () => void;
   onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void;
 }) {
-  const canDrag = task.status !== 'completed';
   const urgency = startUrgency(task, now);
-  return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${urgency ? `has-start-countdown start-${urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''} ${canDrag ? '' : 'is-locked'}`}
-    draggable={canDrag} tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
+  return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${urgency ? `has-start-countdown start-${urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''}`}
+    draggable tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
     <div className="card-stripe" />
     <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon">↻</span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
@@ -322,7 +321,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
       {task.status === 'pending' && <span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span>}
       {task.status === 'inProgress' && <span>▶ {formatTime(task.startedAt)}</span>}
       {task.status === 'completed' && <span>✓ {formatTime(task.completedAt)}</span>}
-    </div>{canDrag && <span className="drag-hint" aria-hidden="true">⋮⋮</span>}
+    </div><span className="drag-hint" aria-hidden="true">⋮⋮</span>
   </article>;
 }
 
@@ -740,7 +739,7 @@ export default function Home() {
         <header className="column-header"><span className="column-index">{board.index}</span><div><h2>{board.title}</h2><p>{board.subtitle}</p></div><strong>{String(boardTasks.length).padStart(2, '0')}</strong></header>
         <div className="task-stack">{visible.map((task) => <TaskCard key={task.id} task={task} color={typeColor(task.taskType, settings)} now={now} dragging={draggingId === task.id} landed={landedId === task.id}
           onStart={() => moveTask(task.id, 'inProgress')}
-          onOpen={() => setDraft(task)} onDragStart={(event) => { if (task.status === 'completed') return; setDraggingId(task.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.id); }} onDragEnd={() => { setDraggingId(''); setDropTarget(''); }}
+          onOpen={() => setDraft(task)} onDragStart={(event) => { setDraggingId(task.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.id); }} onDragEnd={() => { setDraggingId(''); setDropTarget(''); }}
           onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (!draggingId) return; const source = tasks.find((item) => item.id === draggingId); if (source?.status === task.status) reorderWithin(task.status, draggingId, task.id); else moveTask(draggingId, task.status); }} />)}
           {boardTasks.length === 0 && <button className="empty-state" onClick={() => openNewTask(board.id)}><span>＋</span><strong>DROP MISSION HERE</strong><small>拖入任务或点击新增</small></button>}
         </div>
