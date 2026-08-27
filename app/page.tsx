@@ -310,7 +310,7 @@ function actionDayMinute(minute: number) {
 }
 
 function layoutDaySchedule(tasks: Task[], dayKey: string, referenceNow = new Date()): DayScheduleBlock[] {
-  const windows = tasks.flatMap((task) => {
+  const windows = tasks.flatMap<DayScheduleBlock>((task) => {
     const window = taskWindowOnDay(task, dayKey, referenceNow);
     if (!window) return [];
     if (window.variant === 'pending-start' || window.variant === 'pending-deadline') {
