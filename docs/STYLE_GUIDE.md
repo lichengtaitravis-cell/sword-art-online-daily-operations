@@ -209,8 +209,13 @@ Do not place the lockup on a busy photograph, recolor individual letters arbitra
 
 ### Daily flow window
 
-- On desktop, the daily-flow window height follows the fixed 24-hour distribution panel. The adjacent agenda must scroll internally when its task list exceeds that height; list growth must never stretch the time map or create blank space beneath it.
+- On desktop, the daily-flow axis is explicitly date-relative: selected-day `00:00–02:00` appears at the top, selected-day `02:00–07:00` is a compressed OFF band, selected-day `07:00–24:00` is the main field, and next-day `00:00–02:00` is at the bottom. The adjacent agenda must scroll internally when its task list exceeds that height; list growth must never stretch the time map or create blank space beneath it.
 - On narrow screens, the two modules may stack inside one fixed viewport-height window, while each module preserves a bounded working height.
+- DAILY FLOW remains open underneath its task detail. Closing, cancelling, saving, or deleting that detail returns to the same day flow; navigating to any application tab clears the complete dialog stack.
+- Time-distribution geometry is status-driven. Completed uses its real start-to-complete interval. In Progress grows from its real start to the current clock and melts directly out of the task block as one continuous, solid task-type-color mass. The attachment edge never moves, scales, changes color, or reveals a seam; animation is limited to the lower contour, where irregular wave troughs and connected near-drips propagate left to right. A separate ink silhouette sits behind the spill to expose a black comic outline only along its sides and underside. Never add gloss gradients, moving overlay sheets, yellow status fill, or any motion that can make the spill detach from the block. Pending with a planned start uses one fixed readable start marker and ignores deadline width; Pending without a start but with a deadline uses a separate deadline-warning marker.
+- Concurrent windows automatically receive separate lanes. The compressed OFF band preserves selected-day midnight-to-morning tasks at the top. Within one DAILY FLOW window, each In Progress or Completed interval is one continuous block even when it crosses midnight; never split it at `00:00`. On the following selected date, the same cross-day interval resumes from the top with an explicit continuation treatment.
+- Task-block labels are all-or-nothing. When available height or lane width cannot contain the complete time/title treatment, hide that treatment and retain an accessible label on the interactive block; never show vertically clipped half-text.
+- Timeline rules and lane rules use the same date-relative coordinate system. Grid strokes must remain continuous across the compressed band boundary rather than producing a stitched or broken-line illusion.
 
 ### Form controls
 
