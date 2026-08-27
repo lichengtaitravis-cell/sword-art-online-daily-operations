@@ -151,7 +151,7 @@ function transitionTask(task: Task, next: Status): Task {
   if (task.status === next) return task;
   const now = new Date().toISOString();
   if (next === 'pending') return { ...task, status: next, startedAt: '', completedAt: '', manualOrder: null };
-  if (next === 'inProgress') return { ...task, status: next, startedAt: task.startedAt || now, completedAt: '', manualOrder: null };
+  if (next === 'inProgress') return { ...task, status: next, startedAt: now, completedAt: '', manualOrder: null };
   return { ...task, status: next, startedAt: task.startedAt || now, completedAt: now, manualOrder: null };
 }
 

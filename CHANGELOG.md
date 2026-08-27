@@ -15,3 +15,4 @@ All notable project changes will be documented in this file.
 - Color-grouped task-type ordering in defaults, filters, and mission details
 - Mission descriptions in the archive and SQLite-backed username customization
 - Refresh-safe scheduled-start countdowns with 60/30/15/5/1-minute and 10-second escalation, crisis states, and one-click mission start
+- Actual start timestamps captured at the moment a Pending mission enters In Progress
