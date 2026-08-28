@@ -31,6 +31,8 @@ type Task = {
   location: string;
   recurrence: Recurrence;
   recurrenceDays: number[];
+  recurrenceStartTime: string;
+  isRecurrenceTemplate: boolean;
   seriesId: string;
   seriesHead: boolean;
   lastGeneratedDate: string;
@@ -78,8 +80,8 @@ const VISIBLE_LIMIT: Record<Status, number> = { pending: 5, inProgress: 5, compl
 const STATUS_ORDER: Record<Status, number> = { inProgress: 0, pending: 1, completed: 2 };
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const TYPE_COLOR_ORDER: Record<TypeColor, number> = { purple: 0, blue: 1, green: 2, yellow: 3 };
-const ACTION_DAY_START = 7 * 60;
-const ACTION_DAY_NIGHT_END = 2 * 60;
+const ACTION_DAY_START = 2 * 60;
+const ACTION_DAY_ACTIVE_START = 7 * 60;
 const ACTION_DAY_MAIN_MINUTES = 19 * 60;
 const ACTION_DAY_OFFLINE_DISPLAY_MINUTES = 120;
 const ACTION_DAY_DISPLAY_MINUTES = ACTION_DAY_MAIN_MINUTES + ACTION_DAY_OFFLINE_DISPLAY_MINUTES;
@@ -117,6 +119,21 @@ function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function localTimeKey(value: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function dateAtLocalTime(date: Date, time: string) {
+  if (!/^\d{2}:\d{2}$/.test(time)) return '';
+  const [hour, minute] = time.split(':').map(Number);
+  const result = new Date(date);
+  result.setHours(hour, minute, 0, 0);
+  return result.toISOString();
+}
+
 function dateAt(offset: number, hour: number, minute = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offset);
@@ -129,7 +146,7 @@ function newTask(settings: PlannerSettings, index: number): Task {
   return {
     id, index, title: '', description: '', status: 'pending', taskType: settings.defaultTaskType,
     startedAt: '', completedAt: '', dueAt: '', priority: 'medium', location: settings.defaultLocation,
-    recurrence: 'none', recurrenceDays: [new Date().getDay()], seriesId: id, seriesHead: false,
+    recurrence: 'none', recurrenceDays: [new Date().getDay()], recurrenceStartTime: '', isRecurrenceTemplate: false, seriesId: id, seriesHead: false,
     lastGeneratedDate: localDateKey(new Date()), manualOrder: null,
   };
 }
@@ -154,6 +171,8 @@ function normalizeTasks(raw: Partial<Task>[]): Task[] {
     ...task,
     index: task.index ?? position + 1,
     recurrenceDays: task.recurrenceDays ?? [Number((task as Partial<Task> & { recurrenceDay?: number }).recurrenceDay ?? new Date().getDay())],
+    recurrenceStartTime: task.recurrenceStartTime ?? (task.recurrence && task.recurrence !== 'none' ? localTimeKey(task.startedAt ?? '') : ''),
+    isRecurrenceTemplate: task.isRecurrenceTemplate === true,
     seriesId: task.seriesId ?? task.id ?? crypto.randomUUID(),
     seriesHead: task.seriesHead ?? (task.recurrence !== undefined && task.recurrence !== 'none'),
     lastGeneratedDate: task.lastGeneratedDate ?? (task as Partial<Task> & { lastResetDate?: string }).lastResetDate ?? today,
@@ -178,7 +197,7 @@ function sortTasks(tasks: Task[], status: Status) {
 function transitionTask(task: Task, next: Status): Task {
   if (task.status === next) return task;
   const now = new Date().toISOString();
-  if (next === 'pending') return { ...task, status: next, startedAt: '', completedAt: '', manualOrder: null };
+  if (next === 'pending') return { ...task, status: next, startedAt: task.recurrenceStartTime ? dateAtLocalTime(new Date(), task.recurrenceStartTime) : '', completedAt: '', manualOrder: null };
   if (next === 'inProgress') return { ...task, status: next, startedAt: now, completedAt: '', manualOrder: null };
   return { ...task, status: next, startedAt: task.startedAt || now, completedAt: now, manualOrder: null };
 }
@@ -190,33 +209,80 @@ function shouldGenerate(task: Task, now: Date) {
   return false;
 }
 
+function ensureRecurrenceTemplates(tasks: Task[]) {
+  const templateSeries = new Set(tasks.filter((task) => task.isRecurrenceTemplate).map((task) => task.seriesId || task.id));
+  const sourceBySeries = new Map<string, Task>();
+  const startTimeBySeries = new Map<string, { index: number; time: string }>();
+  tasks.filter((task) => !task.isRecurrenceTemplate && task.recurrence !== 'none').forEach((task) => {
+    const seriesKey = task.seriesId || task.id;
+    const source = sourceBySeries.get(seriesKey);
+    if (!source || task.seriesHead || (!source.seriesHead && task.index > source.index)) sourceBySeries.set(seriesKey, task);
+    const candidateStartTime = task.recurrenceStartTime || localTimeKey(task.startedAt);
+    if (candidateStartTime) {
+      const template = startTimeBySeries.get(seriesKey);
+      if (!template || task.index > template.index) startTimeBySeries.set(seriesKey, { index: task.index, time: candidateStartTime });
+    }
+  });
+  const normalized = tasks.map((task) => {
+    if (task.isRecurrenceTemplate) return task;
+    const seriesKey = task.seriesId || task.id;
+    const recurrenceStartTime = task.recurrence === 'none' ? '' : startTimeBySeries.get(seriesKey)?.time ?? task.recurrenceStartTime;
+    const generatedDate = /^\d{4}-\d{2}-\d{2}$/.test(task.lastGeneratedDate) ? new Date(`${task.lastGeneratedDate}T00:00:00`) : new Date();
+    const startedAt = task.recurrence !== 'none' && sourceBySeries.get(seriesKey)?.id === task.id && task.status === 'pending' && !task.startedAt && recurrenceStartTime
+      ? dateAtLocalTime(generatedDate, recurrenceStartTime)
+      : task.startedAt;
+    if (!task.seriesHead && task.recurrenceStartTime === recurrenceStartTime && task.startedAt === startedAt) return task;
+    return { ...task, seriesHead: false, recurrenceStartTime, startedAt };
+  });
+  const templates = [...sourceBySeries.entries()].flatMap(([seriesId, source]) => {
+    if (templateSeries.has(seriesId)) return [];
+    const recurrenceStartTime = startTimeBySeries.get(seriesId)?.time ?? source.recurrenceStartTime;
+    const startedAt = recurrenceStartTime ? dateAtLocalTime(new Date(source.startedAt || source.dueAt || new Date()), recurrenceStartTime) : source.startedAt;
+    return [{
+      ...source,
+      id: `repeat-template-${seriesId}`,
+      status: 'pending' as const,
+      startedAt,
+      completedAt: '',
+      recurrenceStartTime,
+      isRecurrenceTemplate: true,
+      seriesId,
+      seriesHead: true,
+      manualOrder: null,
+    }];
+  });
+  return templates.length || normalized.some((task, index) => task !== tasks[index]) ? [...normalized, ...templates] : tasks;
+}
+
 function processRecurring(tasks: Task[], enabled = true) {
-  if (!enabled) return tasks;
+  const recurringReady = ensureRecurrenceTemplates(tasks);
+  if (!enabled) return recurringReady;
   const now = new Date();
   const today = localDateKey(now);
-  let nextIndex = tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1;
+  let nextIndex = recurringReady.reduce((max, task) => Math.max(max, task.index), 0) + 1;
   const generated: Task[] = [];
-  const updated = tasks.map((task) => {
-    if (!task.seriesHead || task.recurrence === 'none' || task.lastGeneratedDate === today || !shouldGenerate(task, now)) return task;
+  const updated = recurringReady.map((task) => {
+    if (!task.isRecurrenceTemplate || task.recurrence === 'none' || task.lastGeneratedDate === today || !shouldGenerate(task, now)) return task;
     let dueAt = task.dueAt;
     if (dueAt) {
       const due = new Date(dueAt);
       due.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
       dueAt = due.toISOString();
     }
+    const startedAt = task.recurrenceStartTime ? dateAtLocalTime(now, task.recurrenceStartTime) : '';
     const next: Task = {
-      ...task, id: crypto.randomUUID(), index: nextIndex++, status: 'pending', startedAt: '', completedAt: '', dueAt,
-      seriesHead: true, lastGeneratedDate: today, manualOrder: null,
+      ...task, id: crypto.randomUUID(), index: nextIndex++, status: 'pending', startedAt, completedAt: '', dueAt,
+      isRecurrenceTemplate: false, seriesHead: false, lastGeneratedDate: today, manualOrder: null,
     };
     generated.push(next);
-    return { ...task, seriesHead: false, lastGeneratedDate: today };
+    return { ...task, seriesHead: true, lastGeneratedDate: today };
   });
-  if (!generated.length) return tasks;
-  const existingPending = sortTasks(updated.filter((task) => task.status === 'pending'), 'pending');
+  if (!generated.length) return recurringReady;
+  const existingPending = sortTasks(updated.filter((task) => !task.isRecurrenceTemplate && task.status === 'pending'), 'pending');
   if (!existingPending.some((task) => task.manualOrder !== null)) return [...updated, ...generated];
   const orderedPending = [...generated, ...existingPending];
   const ranks = new Map(orderedPending.map((task, index) => [task.id, index]));
-  return [...updated, ...generated].map((task) => task.status === 'pending' ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
+  return [...updated, ...generated].map((task) => !task.isRecurrenceTemplate && task.status === 'pending' ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
 }
 
 function formatTime(value: string, includeDate = true) {
@@ -306,10 +372,9 @@ function taskOccursOnCalendarDay(task: Task, dayKey: string, referenceNow = new 
 function taskOccursInActionDay(task: Task, dayKey: string, referenceNow = new Date()) {
   const range = taskScheduleRange(task, referenceNow);
   if (!range) return false;
-  const actionStart = new Date(`${dayKey}T00:00:00`);
+  const actionStart = new Date(`${dayKey}T02:00:00`);
   const actionEnd = new Date(actionStart);
   actionEnd.setDate(actionEnd.getDate() + 1);
-  actionEnd.setHours(2, 0, 0, 0);
   return +range.start < +actionEnd && +range.end > +actionStart;
 }
 
@@ -327,25 +392,25 @@ function scheduleTimeLabel(variant: ScheduleVariant, startMinute: number, endMin
 
 function taskWindowOnDay(task: Task, dayKey: string, referenceNow = new Date()) {
   const dayStart = new Date(`${dayKey}T00:00:00`);
+  const actionStart = new Date(dayStart);
+  actionStart.setHours(2, 0, 0, 0);
   const calendarEnd = new Date(dayStart);
   calendarEnd.setDate(calendarEnd.getDate() + 1);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  dayEnd.setHours(2, 0, 0, 0);
+  const actionEnd = new Date(actionStart);
+  actionEnd.setDate(actionEnd.getDate() + 1);
   const range = taskScheduleRange(task, referenceNow);
   if (!range) return null;
-  const start = new Date(Math.max(+range.start, +dayStart));
-  const end = new Date(Math.min(+range.end, +dayEnd));
+  const start = new Date(Math.max(+range.start, +actionStart));
+  const end = new Date(Math.min(+range.end, +actionEnd));
   if (+end <= +start) return null;
   const realDuration = +range.end - +range.start;
   const canCrossDay = range.variant === 'in-progress' || range.variant === 'completed';
-  return { startMinute: (+start - +dayStart) / 60_000, endMinute: (+end - +dayStart) / 60_000, variant: range.variant, continuesBefore: canCrossDay && +range.start < +dayStart && realDuration > 0, continuesAfter: canCrossDay && +range.start < +calendarEnd && +range.end > +calendarEnd && realDuration > 0, endsAfterWindow: +range.end > +dayEnd };
+  return { startMinute: (+start - +dayStart) / 60_000, endMinute: (+end - +dayStart) / 60_000, variant: range.variant, continuesBefore: canCrossDay && +range.start < +actionStart && realDuration > 0, continuesAfter: canCrossDay && +range.start < +calendarEnd && +range.end > +calendarEnd && realDuration > 0, endsAfterWindow: +range.end > +actionEnd };
 }
 
 function actionDayMinute(minute: number) {
-  if (minute <= ACTION_DAY_START) return minute * ACTION_DAY_OFFLINE_DISPLAY_MINUTES / ACTION_DAY_START;
-  if (minute <= 24 * 60) return ACTION_DAY_OFFLINE_DISPLAY_MINUTES + minute - ACTION_DAY_START;
-  return ACTION_DAY_OFFLINE_DISPLAY_MINUTES + ACTION_DAY_MAIN_MINUTES - ACTION_DAY_NIGHT_END + minute - 24 * 60;
+  if (minute <= ACTION_DAY_ACTIVE_START) return (minute - ACTION_DAY_START) * ACTION_DAY_OFFLINE_DISPLAY_MINUTES / (ACTION_DAY_ACTIVE_START - ACTION_DAY_START);
+  return ACTION_DAY_OFFLINE_DISPLAY_MINUTES + minute - ACTION_DAY_ACTIVE_START;
 }
 
 function layoutDaySchedule(tasks: Task[], dayKey: string, referenceNow = new Date()): DayScheduleBlock[] {
@@ -357,7 +422,7 @@ function layoutDaySchedule(tasks: Task[], dayKey: string, referenceNow = new Dat
       const anchorDisplay = actionDayMinute(anchor);
       const markerSize = 75;
       const markerStart = Math.max(0, Math.min(ACTION_DAY_DISPLAY_MINUTES - markerSize, window.variant === 'pending-start' ? anchorDisplay : anchorDisplay - markerSize));
-      return [{ id: `${task.id}-marker`, task, startMinute: markerStart, endMinute: markerStart + markerSize, labelStartMinute: window.startMinute, labelEndMinute: window.endMinute, lane: 0, laneCount: 1, offline: anchor >= ACTION_DAY_NIGHT_END && anchor < ACTION_DAY_START, variant: window.variant, continuesBefore: false, continuesAfter: false, terminal: true }];
+      return [{ id: `${task.id}-marker`, task, startMinute: markerStart, endMinute: markerStart + markerSize, labelStartMinute: window.startMinute, labelEndMinute: window.endMinute, lane: 0, laneCount: 1, offline: (anchor >= ACTION_DAY_START && anchor < ACTION_DAY_ACTIVE_START) || anchor >= 24 * 60, variant: window.variant, continuesBefore: false, continuesAfter: false, terminal: true }];
     }
     return [{
       id: `${task.id}-range`,
@@ -368,7 +433,7 @@ function layoutDaySchedule(tasks: Task[], dayKey: string, referenceNow = new Dat
       labelEndMinute: window.endMinute,
       lane: 0,
       laneCount: 1,
-      offline: window.endMinute <= ACTION_DAY_START,
+      offline: window.endMinute <= ACTION_DAY_ACTIVE_START || window.startMinute >= 24 * 60,
       variant: window.variant,
       continuesBefore: window.continuesBefore,
       continuesAfter: window.continuesAfter,
@@ -604,7 +669,8 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
   onDragStart: (event: React.DragEvent<HTMLElement>) => void; onDragEnd: () => void;
   onDragOver: (event: React.DragEvent<HTMLElement>) => void; onDrop: (event: React.DragEvent<HTMLElement>) => void;
 }) {
-  const countdown = countdownSignals(task, now).sort(compareCountdownSignals)[0];
+  const countdowns = countdownSignals(task, now);
+  const countdown = countdowns.find((signal) => signal.kind === 'start') ?? countdowns.sort(compareCountdownSignals)[0];
   return <article className={`task-card status-${task.status} type-${color} priority-${task.priority} ${countdown ? `has-countdown countdown-${countdown.kind} signal-${countdown.urgency}` : ''} ${dragging ? 'is-dragging' : ''} ${landed ? 'is-landed' : ''}`}
     draggable tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
@@ -668,10 +734,12 @@ export default function Home() {
   const [calendarMonth, setCalendarMonth] = useState(() => { const date = new Date(); date.setDate(1); return date; });
   const [selectedDay, setSelectedDay] = useState(localDateKey(new Date()));
   const [dayAgendaOpen, setDayAgendaOpen] = useState(false);
+  const [linkedScheduleTaskId, setLinkedScheduleTaskId] = useState('');
   const [customType, setCustomType] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
+  const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
 
   useEffect(() => {
     const savedView = window.sessionStorage.getItem(VIEW_SESSION_KEY);
@@ -845,7 +913,7 @@ export default function Home() {
   }, [impact]);
   useEffect(() => {
     if (!hydrated) return;
-    const reminding = tasks.flatMap((task) => countdownSignals(task, clock)).sort(compareCountdownSignals);
+    const reminding = missionTasks.flatMap((task) => countdownSignals(task, clock)).sort(compareCountdownSignals);
     const activeKeys = new Set(reminding.map((signal) => `${signal.task.id}:${signal.kind}`));
     for (const key of reminderBands.current.keys()) if (!activeKeys.has(key)) reminderBands.current.delete(key);
     if (!remindersReady.current) {
@@ -861,26 +929,20 @@ export default function Home() {
       subtitle: `${changed.task.title} · ${countdownSignalLabel(changed)}`,
       tier: changed.urgency,
     });
-  }, [clock, hydrated, tasks]);
+  }, [clock, hydrated, missionTasks]);
 
   const grouped = useMemo(() => boardMeta.reduce((result, board) => {
     const today = localDateKey(new Date());
-    const boardTasks = tasks.filter((task) => task.status === board.id && (board.id !== 'completed' || showCompletedHistory || (task.completedAt && localDateKey(new Date(task.completedAt)) === today)));
+    const boardTasks = missionTasks.filter((task) => task.status === board.id && (board.id !== 'completed' || showCompletedHistory || (task.completedAt && localDateKey(new Date(task.completedAt)) === today)));
     result[board.id] = sortTasks(boardTasks, board.id);
     return result;
-  }, {} as Record<Status, Task[]>), [tasks, showCompletedHistory]);
+  }, {} as Record<Status, Task[]>), [missionTasks, showCompletedHistory]);
 
   const activeRecurringTasks = useMemo(() => {
-    const activeSeries = new Map<string, Task>();
-    tasks.filter((task) => task.recurrence !== 'none').forEach((task) => {
-      const seriesKey = task.seriesId || task.id;
-      const current = activeSeries.get(seriesKey);
-      if (!current || task.seriesHead || (!current.seriesHead && task.index > current.index)) activeSeries.set(seriesKey, task);
-    });
-    return [...activeSeries.values()].sort((a, b) => a.index - b.index);
+    return tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none').sort((a, b) => a.index - b.index);
   }, [tasks]);
 
-  const filteredTable = useMemo(() => tasks.filter((task) => {
+  const filteredTable = useMemo(() => missionTasks.filter((task) => {
     const query = tableQuery.trim().toLowerCase();
     return (!query || `${task.title} ${task.description} ${task.taskType} ${task.location}`.toLowerCase().includes(query))
       && (tableStatus === 'all' || task.status === tableStatus)
@@ -893,7 +955,7 @@ export default function Home() {
     if (Boolean(a.dueAt) !== Boolean(b.dueAt)) return a.dueAt ? -1 : 1;
     if (a.dueAt && b.dueAt) return +new Date(a.dueAt) - +new Date(b.dueAt);
     return b.index - a.index;
-  }), [tasks, tableQuery, tableStatus, tableType, tablePriority, tableDate, clock]);
+  }), [missionTasks, tableQuery, tableStatus, tableType, tablePriority, tableDate, clock]);
 
   const calendarDays = useMemo(() => {
     const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
@@ -924,7 +986,7 @@ export default function Home() {
     setTasks((current) => {
       const moving = current.find((item) => item.id === id);
       if (!moving) return current;
-      const targetTasks = sortTasks(current.filter((item) => item.status === status), status);
+      const targetTasks = sortTasks(current.filter((item) => !item.isRecurrenceTemplate && item.status === status), status);
       const transitioned = transitionTask(moving, status);
       const manualTarget = status === 'pending' || targetTasks.some((item) => item.manualOrder !== null);
       if (!manualTarget || status === 'completed') return current.map((item) => item.id === id ? transitioned : item);
@@ -941,7 +1003,7 @@ export default function Home() {
   const reorderWithin = (status: Status, draggedId: string, targetId: string) => {
     if (status === 'completed' || draggedId === targetId) return;
     setTasks((current) => {
-      const ordered = sortTasks(current.filter((task) => task.status === status), status);
+      const ordered = sortTasks(current.filter((task) => !task.isRecurrenceTemplate && task.status === status), status);
       const from = ordered.findIndex((task) => task.id === draggedId);
       const to = ordered.findIndex((task) => task.id === targetId);
       if (from < 0 || to < 0) return current;
@@ -961,34 +1023,47 @@ export default function Home() {
     if (!draft || !draft.title.trim()) return;
     setTasks((current) => {
       const existing = current.find((task) => task.id === draft.id);
+      const scheduleOverride = Boolean(existing && !draft.isRecurrenceTemplate && existing.recurrence !== 'none' && (draft.startedAt !== existing.startedAt || draft.dueAt !== existing.dueAt));
       let saved = existing && existing.status !== draft.status ? transitionTask({ ...draft, status: existing.status }, draft.status) : draft;
-      saved = { ...saved, seriesHead: saved.recurrence !== 'none' ? (existing?.seriesHead ?? true) : false, recurrenceDays: saved.recurrence === 'weekly' && !saved.recurrenceDays.length ? [new Date().getDay()] : saved.recurrenceDays };
+      const savedRecurrence = scheduleOverride ? 'none' : saved.recurrence;
+      const recurrenceStartTime = savedRecurrence === 'none'
+        ? ''
+        : saved.status === 'pending' && saved.startedAt
+          ? localTimeKey(saved.startedAt)
+          : saved.recurrenceStartTime || localTimeKey(saved.startedAt);
+      saved = { ...saved, status: saved.isRecurrenceTemplate ? 'pending' : saved.status, completedAt: saved.isRecurrenceTemplate ? '' : saved.completedAt, recurrence: savedRecurrence, seriesHead: saved.isRecurrenceTemplate && savedRecurrence !== 'none', recurrenceDays: savedRecurrence === 'weekly' && !saved.recurrenceDays.length ? [new Date().getDay()] : saved.recurrenceDays, recurrenceStartTime };
       const enteringBoard = !existing || existing.status !== saved.status;
-      const targetTasks = sortTasks(current.filter((task) => task.status === saved.status && task.id !== saved.id), saved.status);
-      const shouldInsertManually = saved.status !== 'completed' && enteringBoard && (saved.status === 'pending' || targetTasks.some((task) => task.manualOrder !== null));
+      const targetTasks = sortTasks(current.filter((task) => !task.isRecurrenceTemplate && task.status === saved.status && task.id !== saved.id), saved.status);
+      const shouldInsertManually = !saved.isRecurrenceTemplate && saved.status !== 'completed' && enteringBoard && (saved.status === 'pending' || targetTasks.some((task) => task.manualOrder !== null));
+      let nextTasks: Task[];
       if (shouldInsertManually) {
         const order = [saved, ...targetTasks];
         const ranks = new Map(order.map((task, index) => [task.id, index]));
-        const updated = current.map((task) => task.id === saved.id ? { ...saved, manualOrder: 0 } : task.status === saved.status ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
-        return existing ? updated : [...updated, { ...saved, manualOrder: 0 }];
+        const updated = current.map((task) => task.id === saved.id ? { ...saved, manualOrder: 0 } : !task.isRecurrenceTemplate && task.status === saved.status ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
+        nextTasks = existing ? updated : [...updated, { ...saved, manualOrder: 0 }];
+      } else {
+        nextTasks = existing ? current.map((task) => task.id === draft.id ? saved : task) : [...current, saved];
       }
-      return existing ? current.map((task) => task.id === draft.id ? saved : task) : [...current, saved];
+      if (saved.isRecurrenceTemplate && saved.recurrence === 'none') nextTasks = nextTasks.map((task) => task.seriesId === saved.seriesId && !task.isRecurrenceTemplate ? { ...task, recurrence: 'none', recurrenceStartTime: '', seriesHead: false } : task);
+      return saved.isRecurrenceTemplate ? processRecurring(nextTasks, settings.recurrenceEnabled) : ensureRecurrenceTemplates(nextTasks);
     });
     setDraft(null);
-    setToast('任务已保存');
+    setToast(draft.isRecurrenceTemplate ? '循环模板已保存' : '任务已保存');
   };
 
   const deleteDraft = () => {
     if (!draft || !tasks.some((task) => task.id === draft.id)) return;
-    setTasks((current) => current.filter((task) => task.id !== draft.id));
+    setTasks((current) => draft.isRecurrenceTemplate
+      ? current.filter((task) => task.id !== draft.id).map((task) => task.seriesId === draft.seriesId ? { ...task, recurrence: 'none', recurrenceStartTime: '', seriesHead: false } : task)
+      : current.filter((task) => task.id !== draft.id));
     setDraft(null);
-    setToast('任务已删除');
+    setToast(draft.isRecurrenceTemplate ? '循环模板已删除' : '任务已删除');
   };
 
   const openNewTask = (status: Status = 'pending', dueAt = '') => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), status, dueAt });
-  const openNewRecurringTask = () => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), recurrence: 'daily', recurrenceDays: [new Date().getDay()], seriesHead: true });
+  const openNewRecurringTask = () => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), recurrence: 'daily', recurrenceDays: [new Date().getDay()], isRecurrenceTemplate: true, seriesHead: true, lastGeneratedDate: '' });
   const stopRecurringTask = (seriesId: string) => {
-    setTasks((current) => current.map((task) => task.seriesId === seriesId ? { ...task, recurrence: 'none', seriesHead: false } : task));
+    setTasks((current) => current.map((task) => task.seriesId === seriesId ? { ...task, recurrence: 'none', recurrenceStartTime: '', seriesHead: false } : task));
     setToast('循环任务已关闭');
   };
 
@@ -1043,15 +1118,15 @@ export default function Home() {
     }, 420);
   };
   const now = clock;
-  const completedToday = tasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
-  const selectedDayTasks = tasks.filter((task) => taskOccursInActionDay(task, selectedDay, now)).sort((a, b) => +new Date(calendarTaskDate(a, now)) - +new Date(calendarTaskDate(b, now)));
+  const completedToday = missionTasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
+  const selectedDayTasks = missionTasks.filter((task) => taskOccursInActionDay(task, selectedDay, now)).sort((a, b) => +new Date(calendarTaskDate(a, now)) - +new Date(calendarTaskDate(b, now)));
   const dayScheduleBlocks = useMemo(() => layoutDaySchedule(selectedDayTasks, selectedDay, now), [selectedDayTasks, selectedDay, now]);
   const dayTimelineEntries = useMemo(() => selectedDayTasks.flatMap((task) => {
     const window = taskWindowOnDay(task, selectedDay, now);
     return window ? [{ task, ...window, displayStartMinute: actionDayMinute(window.startMinute) }] : [];
   }).sort((a, b) => a.displayStartMinute - b.displayStartMinute), [selectedDayTasks, selectedDay, now]);
   const activeNav = navItems.find((item) => item.id === view)!;
-  const activeCountdowns = tasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
+  const activeCountdowns = missionTasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
   const visibleCountdowns = activeCountdowns.slice(0, 4);
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
@@ -1086,7 +1161,7 @@ export default function Home() {
     <header className="hero">
       <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} username={settings.username} />
       <div className="day-card" aria-label="今日日期"><span>{new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now).toUpperCase()}</span><strong>{String(now.getDate()).padStart(2, '0')}</strong><em>{new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(now).toUpperCase()}</em></div>
-      <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {tasks.length}</small></strong><div className="summary-track"><i style={{ width: `${tasks.length ? Math.min(100, completedToday / tasks.length * 100) : 0}%` }} /></div></div>
+      <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {missionTasks.length}</small></strong><div className="summary-track"><i style={{ width: `${missionTasks.length ? Math.min(100, completedToday / missionTasks.length * 100) : 0}%` }} /></div></div>
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
@@ -1107,7 +1182,7 @@ export default function Home() {
           {boardTasks.length === 0 && <button className="empty-state" onClick={() => openNewTask(board.id)}><span>＋</span><strong>DROP MISSION HERE</strong><small>拖入任务或点击新增</small></button>}
         </div>
         {(hiddenCount > 0 || showAll[board.id]) && <button className="reveal-button" onClick={() => setShowAll((current) => ({ ...current, [board.id]: !current[board.id] }))}>{showAll[board.id] ? '收起任务 ↑' : `显示其余 ${hiddenCount} 个任务 ↓`}</button>}
-        {board.id === 'completed' && tasks.some((task) => task.status === 'completed' && task.completedAt && localDateKey(new Date(task.completedAt)) !== localDateKey(now)) && <button className="history-button" onClick={() => { setShowCompletedHistory((current) => !current); setShowAll((current) => ({ ...current, completed: false })); }}>{showCompletedHistory ? '只看今天完成 ✓' : '查看过去完成记录 ↗'}</button>}
+        {board.id === 'completed' && missionTasks.some((task) => task.status === 'completed' && task.completedAt && localDateKey(new Date(task.completedAt)) !== localDateKey(now)) && <button className="history-button" onClick={() => { setShowCompletedHistory((current) => !current); setShowAll((current) => ({ ...current, completed: false })); }}>{showCompletedHistory ? '只看今天完成 ✓' : '查看过去完成记录 ↗'}</button>}
       </section>;
     })}</section>}
 
@@ -1126,7 +1201,7 @@ export default function Home() {
     {view === 'calendar' && <section className="calendar-page">
       <header className="page-banner"><span>03</span><div><p>MONTHLY OPERATION MAP</p><h2>CALENDAR</h2></div><div className="month-nav"><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button><strong>{calendarMonth.getFullYear()} / {String(calendarMonth.getMonth() + 1).padStart(2, '0')}</strong><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>›</button></div></header>
       <div className="calendar-layout"><div className="month-grid"><div className="weekday-row">{WEEKDAYS.map((day) => <span key={day}>周{day}</span>)}</div><div className="calendar-grid">{calendarDays.map((day) => {
-        const key = localDateKey(day); const dayTasks = tasks.filter((task) => taskOccursOnCalendarDay(task, key, now));
+        const key = localDateKey(day); const dayTasks = missionTasks.filter((task) => taskOccursOnCalendarDay(task, key, now));
         return <button key={key} className={`calendar-day ${day.getMonth() !== calendarMonth.getMonth() ? 'outside' : ''} ${key === localDateKey(now) ? 'today' : ''} ${key === selectedDay ? 'selected' : ''}`} onClick={() => { setSelectedDay(key); setDayAgendaOpen(true); }}><span className="day-number">{day.getDate()}</span><div className="day-missions">{dayTasks.slice(0, 3).map((task) => <span key={task.id} className={`calendar-task type-${typeColor(task.taskType, settings)}`}>{task.title}</span>)}{dayTasks.length > 3 && <em>+{dayTasks.length - 3} MORE</em>}</div></button>;
       })}</div></div>
       </div>
@@ -1147,7 +1222,7 @@ export default function Home() {
             </section>
             <section className="repeat-roster">
               <header><div><span>ACTIVE REPEATERS</span><strong>{activeRecurringTasks.length} 个循环任务</strong></div><div className="repeat-roster-actions"><button type="button" className="add-repeater" onClick={openNewRecurringTask}>＋ 添加循环任务</button>{activeRecurringTasks.length > 0 && <button type="button" className="toggle-repeaters" aria-expanded={repeatersExpanded} aria-controls="active-repeaters-list" onClick={() => setRepeatersExpanded((current) => !current)}>{repeatersExpanded ? '收起 ↑' : '展开 ↓'}</button>}</div></header>
-              {repeatersExpanded && (activeRecurringTasks.length ? <div className="recurrence-series-list" id="active-repeaters-list">{activeRecurringTasks.map((task) => <article key={task.id} className={`recurrence-series-item status-${task.status}`}><i aria-hidden="true">↻</i><div><strong>{task.title}</strong><span>{recurrenceLabel(task)} · {statusLabel(task.status)} · {task.dueAt ? `截止 ${formatTime(task.dueAt)}` : '未设置截止'}</span></div><button type="button" onClick={() => setDraft(task)}>编辑</button><button type="button" className="stop-repeat" onClick={() => stopRecurringTask(task.seriesId)}>关闭循环</button></article>)}</div> : <div className="recurrence-empty"><strong>NO ACTIVE LOOPS</strong><span>尚无循环任务。创建后会在这里持续显示。</span></div>)}
+              {repeatersExpanded && (activeRecurringTasks.length ? <div className="recurrence-series-list" id="active-repeaters-list">{activeRecurringTasks.map((task) => <article key={task.id} className="recurrence-series-item status-pending"><i aria-hidden="true">↻</i><div><strong>{task.title}</strong><span>{recurrenceLabel(task)} · 模板 {task.startedAt ? formatTime(task.startedAt, false) : '未设置开始'} → {task.dueAt ? formatTime(task.dueAt, false) : '未设置截止'}</span></div><button type="button" onClick={() => setDraft(task)}>编辑模板</button><button type="button" className="stop-repeat" onClick={() => stopRecurringTask(task.seriesId)}>关闭循环</button></article>)}</div> : <div className="recurrence-empty"><strong>NO ACTIVE LOOPS</strong><span>尚无循环任务。创建后会在这里持续显示。</span></div>)}
             </section>
           </div>
         </section>
@@ -1174,19 +1249,20 @@ export default function Home() {
             const hideLabel = duration < 2.8 || laneWidth < 13;
             const compactLabel = !hideLabel && (duration < 4.8 || laneWidth < 20);
             const blockLabel = `${scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)} ${block.task.title}`;
-            return <button key={block.id} aria-label={blockLabel} title={blockLabel} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : compactLabel ? 'is-compact' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
+            return <button key={block.id} aria-label={blockLabel} title={blockLabel} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : compactLabel ? 'is-compact' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''} ${linkedScheduleTaskId === block.task.id ? 'is-linked-highlight' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
           })}</div>
-        </div></section><section className="schedule-list"><header><span>AFTER SCHOOL AGENDA</span><strong>当天任务表</strong></header><div className="timeline">{dayTimelineEntries.map((entry) => <button key={entry.task.id} onClick={() => setDraft(entry.task)}><time>{scheduleTimeLabel(entry.variant, entry.startMinute, entry.endMinute, !entry.continuesAfter)}</time><i className={`type-${typeColor(entry.task.taskType, settings)}`} /><div><strong>{entry.task.title}</strong><span>{entry.task.taskType} · {entry.task.location}</span></div></button>)}{!dayTimelineEntries.length && <div className="agenda-empty"><strong>FREE DAY!</strong><span>这一天还没有安排任务</span></div>}</div><button className="schedule-add" onClick={() => openNewTask('pending', new Date(`${selectedDay}T12:00`).toISOString())}>＋ ADD MISSION / 添加任务</button></section></div>
+        </div></section><section className="schedule-list"><header><span>AFTER SCHOOL AGENDA</span><strong>当天任务表</strong></header><div className="timeline">{dayTimelineEntries.map((entry) => <button key={entry.task.id} onMouseEnter={() => setLinkedScheduleTaskId(entry.task.id)} onMouseLeave={() => setLinkedScheduleTaskId('')} onFocus={() => setLinkedScheduleTaskId(entry.task.id)} onBlur={() => setLinkedScheduleTaskId('')} onClick={() => setDraft(entry.task)}><time>{scheduleTimeLabel(entry.variant, entry.startMinute, entry.endMinute, !entry.continuesAfter)}</time><i className={`type-${typeColor(entry.task.taskType, settings)}`} /><div><strong>{entry.task.title}</strong><span>{entry.task.taskType} · {entry.task.location}</span></div></button>)}{!dayTimelineEntries.length && <div className="agenda-empty"><strong>FREE DAY!</strong><span>这一天还没有安排任务</span></div>}</div><button className="schedule-add" onClick={() => openNewTask('pending', new Date(`${selectedDay}T12:00`).toISOString())}>＋ ADD MISSION / 添加任务</button></section></div>
       </section>
     </div>}
 
     {draft && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDraft(null); }}><form className="task-modal" onSubmit={saveDraft} role="dialog" aria-modal="true" aria-labelledby="task-dialog-title">
-      <header className={`modal-header type-${typeColor(draft.taskType, settings)}`}><div><span>MISSION DATA</span><h2 id="task-dialog-title">任务详情</h2></div><button type="button" className="close-button" aria-label="关闭" onClick={() => setDraft(null)}>×</button></header>
+      <header className={`modal-header type-${typeColor(draft.taskType, settings)}`}><div><span>{draft.isRecurrenceTemplate ? 'REPEAT PROTOCOL' : 'MISSION DATA'}</span><h2 id="task-dialog-title">{draft.isRecurrenceTemplate ? '循环任务配置' : '任务详情'}</h2></div><button type="button" className="close-button" aria-label="关闭" onClick={() => setDraft(null)}>×</button></header>
       <div className="modal-body"><label className="field field-wide"><span>Title / 标题</span><input autoFocus value={draft.title} placeholder="这次要攻略什么？" onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label><RichTextDescription value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
-        <div className="form-grid"><ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} /><ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label="Start / 开始时间" value={draft.startedAt} onClick={() => openDatePicker('startedAt')} /><DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} /><DateChoice label="Deadline / 截止时间" value={draft.dueAt} onClick={() => openDatePicker('dueAt')} /><ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
+        <div className="form-grid">{!draft.isRecurrenceTemplate && <ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} />}<ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Start / 循环开始' : 'Start / 开始时间'} value={draft.startedAt} onClick={() => openDatePicker('startedAt')} />{!draft.isRecurrenceTemplate && <DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} />}<DateChoice label={draft.isRecurrenceTemplate ? 'Planned Deadline / 循环截止' : 'Deadline / 截止时间'} value={draft.dueAt} onClick={() => openDatePicker('dueAt')} /><ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
         {draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
-        {draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 到达循环日后会生成新的 Pending 任务；已完成的历史任务会完整保留在 Completed。</p>}
-      </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>删除任务</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">保存任务 <span>→</span></button></footer>
+        {draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 这里保存独立循环模板；修改当天生成的任务不会改变本模板。</p>}
+        {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；修改开始或截止时间后，仅本次任务会脱离循环，模板保持不变。</p>}
+      </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>{draft.isRecurrenceTemplate ? '删除循环模板' : '删除任务'}</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">{draft.isRecurrenceTemplate ? '保存循环模板' : '保存任务'} <span>→</span></button></footer>
     </form></div>}
 
     {choiceField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setChoiceField(null); }}><section className="persona-selector" role="dialog" aria-modal="true"><header><span>SELECT OPTION</span><strong>{choiceField === 'taskType' ? '任务类型' : choiceField === 'location' ? '地点' : choiceField === 'priority' ? '优先级' : choiceField === 'recurrence' ? '循环' : '状态'}</strong><button type="button" className="selector-close-button" aria-label="关闭选项窗口" onClick={() => setChoiceField(null)}>×</button></header><div className={`selector-options selector-${choiceField}`}>{choiceOptions.map((option, index) => <button key={option.value} className={`${option.value === choiceValue ? 'active' : ''} ${option.color ? `type-${option.color}` : ''}`} onClick={() => selectChoice(option.value)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i>{option.value === choiceValue ? '●' : '○'}</i></button>)}</div><footer>CHOOSE YOUR MOVE · 选择后自动返回任务详情</footer></section></div>}
