@@ -501,6 +501,12 @@ function countdownSignals(task: Task, now: Date): CountdownSignal[] {
     const urgency = countdownUrgency(task.dueAt, now);
     if (urgency) signals.push({ task, kind: 'deadline', urgency, targetAt: task.dueAt });
   }
+  // Once both windows have been breached, the deadline is the actionable
+  // failure state. Suppress the redundant late-start signal everywhere that
+  // consumes this helper (HUD, card, and impact reminder).
+  if (signals.length === 2 && signals.every((signal) => signal.urgency === 'overdue')) {
+    return signals.filter((signal) => signal.kind === 'deadline');
+  }
   return signals;
 }
 
