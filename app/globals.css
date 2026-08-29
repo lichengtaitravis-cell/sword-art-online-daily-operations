@@ -105,8 +105,9 @@ button { color:inherit; }
 .task-card { --type:var(--purple); position:relative; height:152px; min-height:152px; display:flex; flex-direction:column; overflow:hidden; padding:13px 34px 11px 16px; background:white; border:2px solid var(--ink); box-shadow:3px 3px 0 var(--ink); cursor:grab; transition:transform .16s,box-shadow .16s,opacity .16s; }
 .task-card.has-countdown { height:152px; min-height:152px; }
 .task-card:hover,.task-card:focus-visible { outline:none; transform:translate(-2px,-2px) rotate(-.3deg); box-shadow:6px 6px 0 var(--ink); }
-.task-card:active { cursor:grabbing; }
+.task-card:active { cursor:grabbing; transform:translate(1px,2px) rotate(-.3deg); box-shadow:1px 1px 0 var(--ink); }
 .task-card.is-dragging { opacity:.35; transform:scale(.97) rotate(2deg); }
+.task-card.is-dragging:active { transform:scale(.97) rotate(2deg); }
 .task-card.type-purple,.modal-header.type-purple { --type:var(--purple); }
 .task-card.type-blue,.modal-header.type-blue { --type:var(--blue); }
 .task-card.type-green,.modal-header.type-green { --type:var(--green); }
@@ -131,6 +132,7 @@ button { color:inherit; }
 .task-card.priority-low .priority-label { opacity:.45; }
 @keyframes alertPulse { 50% { opacity:.38; } }
 .task-card.status-inProgress { border-left-width:5px; box-shadow:4px 4px 0 var(--ink),8px 8px 0 color-mix(in srgb,var(--type) 68%,transparent); }
+.task-card.status-inProgress:active { box-shadow:2px 2px 0 var(--ink),4px 4px 0 color-mix(in srgb,var(--type) 68%,transparent); }
 .task-card.status-inProgress::before { content:''; position:absolute; z-index:0; left:8px; right:0; top:-45%; height:38%; pointer-events:none; background:linear-gradient(to bottom,transparent,rgba(247,226,27,.22),transparent); transform:skewY(-5deg); animation:missionLiveSweep 2.25s linear infinite; }
 .task-card.status-inProgress>* { position:relative; z-index:1; }
 .task-card.status-inProgress .card-stripe { animation:missionStripeLive .75s steps(2,end) infinite; }
@@ -373,6 +375,7 @@ button { color:inherit; }
 
 /* Must-do priority */
 .task-card.priority-must { border:4px solid var(--ink); background:repeating-linear-gradient(-45deg,#fff 0 13px,#fff5a0 13px 26px); box-shadow:7px 7px 0 var(--red),11px 11px 0 var(--ink); }
+.task-card.priority-must:active { box-shadow:2px 2px 0 var(--red),4px 4px 0 var(--ink); }
 .task-card.priority-must::before { content:'MUST'; position:absolute; z-index:2; right:-23px; top:9px; width:88px; padding:4px 0; color:white; background:var(--red); border:2px solid var(--ink); text-align:center; font-size:9px; font-weight:1000; letter-spacing:.13em; transform:rotate(39deg); }
 .task-card.priority-must .priority-label { padding:3px 6px; color:white; background:var(--red); border:2px solid var(--ink); animation:mustPulse 1.25s ease-in-out infinite; }
 .task-card.priority-must .card-stripe { background:var(--red); }.priority-chip.priority-must { color:white; background:var(--red); box-shadow:2px 2px 0 var(--ink); }
@@ -703,16 +706,20 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 @media (max-width:760px) { .recurrence-series-item { grid-template-columns:18px 34px minmax(0,1fr); }.recurrence-series-item>div { grid-column:3/4; }.recurrence-series-item>button:first-of-type { grid-column:2/3; }.recurrence-series-item .stop-repeat { grid-column:3/4; } }
 
 /* DAILY OPS density switch and compact mission-card system. */
-.board-density-control { position:relative; z-index:4; width:max-content; height:0; min-height:0; display:flex; align-items:flex-start; justify-content:flex-end; margin:0 8px 0 auto; transform:translateY(-42px) skewX(-3deg); }
-.board-density-control button { height:34px; min-height:30px; display:grid; grid-template-columns:16px auto; grid-template-rows:1fr 1fr; align-items:center; column-gap:5px; padding:3px 9px; color:white; background:transparent; border:0; border-right:1px solid rgba(255,255,255,.28); cursor:pointer; transform:skewX(3deg); }
-.board-density-control button:last-child { border-right:0; }
-.board-density-control button i { grid-row:1/3; color:var(--yellow); font-size:17px; font-style:normal; line-height:1; }
+.board-density-control { position:relative; z-index:4; width:max-content; height:0; min-height:0; display:flex; align-items:flex-start; justify-content:flex-end; gap:0; margin:0 8px 0 auto; filter:drop-shadow(3px 3px 0 var(--ink)); transform:translateY(-42px) skewX(-3deg); }
+.board-density-control button { position:relative; height:34px; min-height:30px; display:grid; grid-template-columns:16px auto; grid-template-rows:1fr 1fr; align-items:center; column-gap:5px; padding:3px 10px; color:rgba(255,255,255,.58); background:#181914; border:2px solid white; box-shadow:none; cursor:pointer; transform:skewX(3deg); transition:transform .1s var(--ease-snap),background .1s,color .1s,box-shadow .1s,filter .1s; }
+.board-density-control button:first-child { border-right-width:1px; }
+.board-density-control button + button { margin-left:-1px; border-left-width:1px; }
+.board-density-control button i { grid-row:1/3; color:rgba(247,226,27,.58); font-size:17px; font-style:normal; line-height:1; }
 .board-density-control button strong { align-self:end; font-size:8px; font-style:italic; letter-spacing:.07em; line-height:1; }
-.board-density-control button small { align-self:start; color:#aaa89a; font-size:7px; font-weight:900; line-height:1.2; text-align:left; }
-.board-density-control button:hover { color:var(--ink); background:white; }
-.board-density-control button:hover small { color:#5f5b50; }
-.board-density-control button[aria-pressed="true"] { color:var(--ink); background:var(--yellow); box-shadow:inset 0 -2px 0 var(--ink); }
+.board-density-control button small { align-self:start; color:rgba(255,255,255,.42); font-size:7px; font-weight:900; line-height:1.2; text-align:left; }
+.board-density-control button:not([aria-pressed="true"]):hover { z-index:2; color:white; background:#292a22; }
+.board-density-control button:not([aria-pressed="true"]):hover i { color:var(--yellow); }
+.board-density-control button:not([aria-pressed="true"]):hover small { color:rgba(255,255,255,.72); }
+.board-density-control button[aria-pressed="true"] { z-index:3; color:var(--ink); background:var(--yellow); box-shadow:3px 3px 0 var(--ink),inset 0 -2px 0 var(--ink); transform:translateY(-2px) skewX(3deg); }
 .board-density-control button[aria-pressed="true"] i,.board-density-control button[aria-pressed="true"] small { color:var(--ink); }
+.board-density-control button:active { transform:translate(1px,2px) skewX(3deg); }
+.board-density-control button[aria-pressed="true"]:active { box-shadow:1px 1px 0 var(--ink),inset 0 -1px 0 var(--ink); transform:translate(1px,0) skewX(3deg); }
 .board-density-control button:focus-visible { position:relative; z-index:1; outline:3px solid var(--yellow); outline-offset:2px; }
 
 .pending-state-signal { display:none; }
@@ -736,10 +743,12 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 .board.is-compact .task-card.status-inProgress .mission-state-signal { color:var(--yellow); background:var(--ink); border-color:white; }
 .board.is-compact .task-card.status-completed .mission-state-signal { color:var(--yellow); background:var(--ink); border-color:white; box-shadow:2px 2px 0 var(--type); }
 .board.is-compact .task-card.status-inProgress { border-left-width:5px; box-shadow:3px 3px 0 var(--ink),6px 6px 0 color-mix(in srgb,var(--type) 68%,transparent); }
+.board.is-compact .task-card.status-inProgress:active { box-shadow:1px 1px 0 var(--ink),3px 3px 0 color-mix(in srgb,var(--type) 68%,transparent); }
 .board.is-compact .task-card.status-inProgress::before { left:7px; top:-70%; height:55%; }
 .board.is-compact .task-card.status-completed { opacity:.7; }
 .board.is-compact .task-card.status-completed h3 { color:#4b4a43; text-decoration-thickness:2px; }
 .board.is-compact .task-card.priority-must { border-width:3px; box-shadow:4px 4px 0 var(--red),7px 7px 0 var(--ink); }
+.board.is-compact .task-card.priority-must:active { box-shadow:1px 1px 0 var(--red),3px 3px 0 var(--ink); }
 .board.is-compact .task-card.priority-must::before { z-index:5; right:-20px; top:6px; width:72px; padding:2px 0; font-size:7px; }
 .board.is-compact .task-card.priority-must .priority-label { position:absolute; z-index:4; right:42px; top:8px; padding:2px 4px; visibility:visible; font-size:7px; animation:mustPulse 1.25s ease-in-out infinite; }
 .board.is-compact .task-card.priority-must .card-stripe { background:var(--type); }
@@ -756,7 +765,15 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 .board.is-compact .empty-state span { font-size:19px; line-height:1; }
 .board.is-compact .empty-state small { display:none; }
 
-.theme-night .board-density-control button[aria-pressed="true"] { color:var(--ink); background:var(--night-gold); }
+.theme-night .board-density-control { filter:drop-shadow(3px 3px 0 #080806); }
+.theme-night .board-density-control button { color:rgba(238,234,203,.56); background:var(--night-surface); border-color:var(--night-line); }
+.theme-night .board-density-control button i { color:rgba(224,202,70,.56); }
+.theme-night .board-density-control button small { color:var(--night-muted); }
+.theme-night .board-density-control button:not([aria-pressed="true"]):hover { color:var(--night-text); background:var(--night-raised); }
+.theme-night .board-density-control button:not([aria-pressed="true"]):hover small { color:var(--night-text); }
+.theme-night .board-density-control button[aria-pressed="true"] { color:#080806; background:var(--yellow); box-shadow:3px 3px 0 #080806,inset 0 -2px 0 #5f5100; }
+.theme-night .board-density-control button[aria-pressed="true"] i,.theme-night .board-density-control button[aria-pressed="true"] small { color:#080806; }
+.theme-night .board-density-control button[aria-pressed="true"]:active { box-shadow:1px 1px 0 #080806,inset 0 -1px 0 #5f5100; }
 .theme-night .board.is-compact .task-card.status-completed h3 { color:#aaa78e; }
 .theme-night .board.is-compact .compact-card-meta { color:var(--night-muted); }
 
