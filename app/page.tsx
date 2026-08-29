@@ -14,6 +14,7 @@ type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
 type CountdownUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinute' | 'finalTen' | 'overdue';
 type CountdownKind = 'start' | 'deadline';
 type PendingSort = 'priority' | 'start' | 'deadline' | 'custom';
+type BoardDensity = 'standard' | 'compact';
 type ArchiveFilterOption = { value: string; label: string; tone?: string };
 type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'in-progress' | 'completed';
 type DayScheduleBlock = { id: string; task: Task; startMinute: number; endMinute: number; labelStartMinute: number; labelEndMinute: number; lane: number; laneCount: number; offline: boolean; variant: ScheduleVariant; continuesBefore: boolean; continuesAfter: boolean; terminal: boolean };
@@ -78,7 +79,11 @@ const THEME_KEY = 'sao-planner-theme-v1';
 const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
 const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
 const PENDING_SORT_SESSION_KEY = 'sao-planner-pending-sort-v1';
-const VISIBLE_LIMIT: Record<Status, number> = { pending: 5, inProgress: 5, completed: 5 };
+const BOARD_DENSITY_SESSION_KEY = 'sao-planner-board-density-v1';
+const VISIBLE_LIMIT: Record<BoardDensity, Record<Status, number>> = {
+  standard: { pending: 5, inProgress: 5, completed: 5 },
+  compact: { pending: 9, inProgress: 9, completed: 9 },
+};
 const STATUS_ORDER: Record<Status, number> = { inProgress: 0, pending: 1, completed: 2 };
 const PRIORITY_ORDER: Record<Priority, number> = { must: 0, high: 1, medium: 2, low: 3 };
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -882,6 +887,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon">↻</span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
     <h3>{task.title}</h3>
     <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{descriptionToText(task.description) || '\u00a0'}</p>
+    {task.status === 'pending' && <span className="mission-state-signal pending-state-signal" aria-hidden="true">WAIT</span>}
     {task.status === 'inProgress' && <span className="mission-state-signal" aria-hidden="true">LIVE</span>}
     {task.status === 'completed' && <span className="mission-state-signal" aria-hidden="true">CLEAR</span>}
     {countdown && <div className={`card-countdown countdown-${countdown.kind} urgency-${countdown.urgency}`} aria-label={`${countdownSignalLabel(countdown)} ${countdownText(countdown.targetAt, now)}`}><div><span>{countdown.kind === 'start' ? '▶ START' : '⊘ DEADLINE'}</span><small>{countdown.kind === 'start' ? '行动窗口' : '禁忌时限'}</small></div><strong>{countdownText(countdown.targetAt, now)}</strong>{countdown.kind === 'start' ? <button type="button" aria-label={`开始任务：${task.title}`} onClick={(event) => { event.stopPropagation(); onStart(); }}>▶</button> : <i className="deadline-seal" aria-hidden="true" />}</div>}
@@ -889,7 +895,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
       {task.status === 'pending' && <span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span>}
       {task.status === 'inProgress' && <span>▶ {formatTime(task.startedAt)}</span>}
       {task.status === 'completed' && <span>✓ {formatTime(task.completedAt)}</span>}
-    </div><span className="drag-hint" aria-hidden="true">⋮⋮</span>
+    </div><div className="compact-card-meta"><span>{task.location}</span><span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span></div><span className="drag-hint" aria-hidden="true">⋮⋮</span>
   </article>;
 }
 
@@ -919,6 +925,10 @@ export default function Home() {
   const [pageMotion, setPageMotion] = useState<'idle' | 'exit' | 'enter'>('idle');
   const [pageDirection, setPageDirection] = useState<'forward' | 'backward'>('forward');
   const [showAll, setShowAll] = useState<Record<Status, boolean>>({ pending: false, inProgress: false, completed: false });
+  const [boardDensity, setBoardDensity] = useState<BoardDensity>(() => {
+    if (typeof window === 'undefined') return 'standard';
+    return window.sessionStorage.getItem(BOARD_DENSITY_SESSION_KEY) === 'compact' ? 'compact' : 'standard';
+  });
   const [pendingSort, setPendingSort] = useState<PendingSort>(() => {
     if (typeof window === 'undefined') return 'custom';
     const savedSort = window.sessionStorage.getItem(PENDING_SORT_SESSION_KEY);
@@ -1010,6 +1020,11 @@ export default function Home() {
     if (!viewRestored) return;
     window.sessionStorage.setItem(PENDING_SORT_SESSION_KEY, pendingSort);
   }, [pendingSort, viewRestored]);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    window.sessionStorage.setItem(BOARD_DENSITY_SESSION_KEY, boardDensity);
+  }, [boardDensity, viewRestored]);
 
   useEffect(() => {
     if (!dialogStateRestored) return;
@@ -1394,7 +1409,7 @@ export default function Home() {
   }).sort((a, b) => a.displayStartMinute - b.displayStartMinute), [selectedDayTasks, selectedDay, now]);
   const activeNav = navItems.find((item) => item.id === view)!;
   const activeCountdowns = missionTasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
-  const visibleCountdowns = activeCountdowns.slice(0, 4);
+  const visibleCountdowns = activeCountdowns.slice(0, 2);
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
   if (!viewRestored) return <main className="app-shell boot-screen boot-prime" aria-label="正在准备界面" />;
@@ -1432,16 +1447,21 @@ export default function Home() {
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
+    {view === 'board' && <div className="board-density-control" role="group" aria-label="任务卡片显示方式">
+      <button type="button" aria-pressed={boardDensity === 'standard'} onClick={() => { setBoardDensity('standard'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">▦</i><strong>STANDARD</strong><small>标准</small></button>
+      <button type="button" aria-pressed={boardDensity === 'compact'} onClick={() => { setBoardDensity('compact'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">≡</i><strong>COMPACT</strong><small>缩略</small></button>
+    </div>}
+
     {view === 'board' && visibleCountdowns.length > 0 && <section className={`countdown-hud-stack ${visibleCountdowns.length === 1 ? 'is-single' : ''}`} aria-label="当前任务倒计时">{visibleCountdowns.map((signal) => <article key={`${signal.task.id}-${signal.kind}`} className={`countdown-alert countdown-${signal.kind} urgency-${signal.urgency}`}><span><b>{signal.kind === 'start' ? '▶ START' : '⊘ TABOO'}</b><small>{countdownSignalLabel(signal)}</small></span><div><strong>{signal.task.title}</strong><small>{formatTime(signal.targetAt, false)} · {signal.kind === 'start' ? 'MOVE TO IN PROGRESS' : 'DEADLINE LOCK'}</small></div><time>{countdownText(signal.targetAt, now)}</time><button type="button" onClick={() => signal.kind === 'start' ? moveTask(signal.task.id, 'inProgress') : setDraft(signal.task)}>{signal.kind === 'start' ? '▶ START' : 'OPEN ›'}</button></article>)}{activeCountdowns.length > visibleCountdowns.length && <div className="countdown-overflow">＋{activeCountdowns.length - visibleCountdowns.length} MORE SIGNALS / 更多倒计时</div>}</section>}
 
-    {view === 'board' && <section className="board" aria-label="任务看板">{boardMeta.map((board) => {
+    {view === 'board' && <section className={`board is-${boardDensity}`} aria-label={`${boardDensity === 'compact' ? '缩略' : '标准'}任务看板`}>{boardMeta.map((board) => {
       const boardTasks = grouped[board.id];
-      const visible = showAll[board.id] ? boardTasks : boardTasks.slice(0, VISIBLE_LIMIT[board.id]);
+      const visible = showAll[board.id] ? boardTasks : boardTasks.slice(0, VISIBLE_LIMIT[boardDensity][board.id]);
       const hiddenCount = boardTasks.length - visible.length;
       return <section className={`board-column ${dropTarget === board.id ? 'is-target' : ''}`} key={board.id}
         onDragOver={(event) => { event.preventDefault(); setDropTarget(board.id); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(''); }}
         onDrop={(event) => { event.preventDefault(); if (draggingId) moveTask(draggingId, board.id); }}>
-        <header className="column-header"><span className="column-index">{board.index}</span><div><h2>{board.title}</h2><div className="column-subline"><p>{board.subtitle}</p>{board.id === 'pending' && <div className="pending-sort" ref={pendingSortRef}><button type="button" className="column-sort-trigger" aria-haspopup="menu" aria-expanded={pendingSortOpen} onClick={() => setPendingSortOpen((open) => !open)}><span>SORT</span><strong>{pendingSortLabel(pendingSort)}</strong><i>⌄</i></button>{pendingSortOpen && <div className="pending-sort-menu" role="menu" aria-label="等待行动排序方式">{([['custom', '自定义顺序'], ['priority', '优先级'], ['start', '开始时间'], ['deadline', '截止时间']] as [PendingSort, string][]).map(([value, label], index) => <button key={value} type="button" role="menuitemradio" aria-checked={pendingSort === value} className={pendingSort === value ? 'active' : ''} onClick={() => { setPendingSort(value); setPendingSortOpen(false); }}><span>{String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><i>{pendingSort === value ? '●' : '○'}</i></button>)}</div>}</div>}</div></div><strong>{String(boardTasks.length).padStart(2, '0')}</strong></header>
+        <header className="column-header"><span className="column-index">{board.index}</span><div><div className="column-titleline"><h2>{board.title}</h2>{board.id === 'pending' && <div className="pending-sort" ref={pendingSortRef}><button type="button" className="column-sort-trigger" aria-haspopup="menu" aria-expanded={pendingSortOpen} onClick={() => setPendingSortOpen((open) => !open)}><span>SORT</span><strong>{pendingSortLabel(pendingSort)}</strong><i>⌄</i></button>{pendingSortOpen && <div className="pending-sort-menu" role="menu" aria-label="等待行动排序方式">{([['custom', '自定义顺序'], ['priority', '优先级'], ['start', '开始时间'], ['deadline', '截止时间']] as [PendingSort, string][]).map(([value, label], index) => <button key={value} type="button" role="menuitemradio" aria-checked={pendingSort === value} className={pendingSort === value ? 'active' : ''} onClick={() => { setPendingSort(value); setPendingSortOpen(false); }}><span>{String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><i>{pendingSort === value ? '●' : '○'}</i></button>)}</div>}</div>}</div><p>{board.subtitle}</p></div><strong>{String(boardTasks.length).padStart(2, '0')}</strong></header>
         <div className="task-stack">{visible.map((task) => <TaskCard key={task.id} task={task} color={typeColor(task.taskType, settings)} now={now} dragging={draggingId === task.id} landed={landedId === task.id}
           onStart={() => moveTask(task.id, 'inProgress')}
           onOpen={() => setDraft(task)} onDragStart={(event) => { setDraggingId(task.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.id); }} onDragEnd={() => { setDraggingId(''); setDropTarget(''); }}
