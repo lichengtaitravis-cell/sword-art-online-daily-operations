@@ -692,7 +692,8 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     const entry = document.createElement('span');
     entry.className = 'checklist-entry';
     entry.textContent = '\u00a0';
-    item.append(createChecklistInput(), entry);
+    item.insertAdjacentElement('beforeend', createChecklistInput());
+    item.insertAdjacentElement('beforeend', entry);
     return item;
   };
   const normalizeChecklistItem = (item: HTMLLIElement) => {
@@ -702,9 +703,13 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     if (existingEntry) return;
     const entry = document.createElement('span');
     entry.className = 'checklist-entry';
-    Array.from(item.childNodes).filter((node) => node !== checkbox).forEach((node) => entry.append(node));
+    Array.from(item.childNodes).filter((node) => node !== checkbox).forEach((node) => {
+      node.remove();
+      if (node instanceof Element) entry.insertAdjacentElement('beforeend', node);
+      else entry.insertAdjacentText('beforeend', node.textContent ?? '');
+    });
     if (!entry.childNodes.length) entry.textContent = '\u00a0';
-    item.append(entry);
+    item.insertAdjacentElement('beforeend', entry);
   };
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== descriptionMarkup(value)) editorRef.current.innerHTML = descriptionMarkup(value);
@@ -756,7 +761,7 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     Array.from(replacement.children).filter((item): item is HTMLLIElement => item instanceof HTMLLIElement).forEach((item) => {
       const checkbox = Array.from(item.children).find((child): child is HTMLInputElement => child instanceof HTMLInputElement && child.type === 'checkbox');
       if (checklist && !checkbox) {
-        item.prepend(createChecklistInput());
+        item.insertAdjacentElement('afterbegin', createChecklistInput());
       }
       if (checklist) normalizeChecklistItem(item);
       if (!checklist) checkbox?.remove();
@@ -810,7 +815,7 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     if (!(item instanceof HTMLLIElement) || !editorRef.current.contains(item) || !item.parentElement?.matches('ul.checklist')) return;
     event.preventDefault();
     const nextItem = createChecklistItem();
-    item.after(nextItem);
+    item.insertAdjacentElement('afterend', nextItem);
     placeCaretAtChecklistTextStart(nextItem);
     rememberSelection();
     onChange(editorRef.current.innerHTML);
@@ -840,7 +845,7 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     else if (nextItem instanceof HTMLLIElement) placeCaretAtChecklistTextStart(nextItem);
     else if (list instanceof HTMLUListElement) {
       const paragraph = document.createElement('div');
-      paragraph.append(document.createElement('br'));
+      paragraph.insertAdjacentElement('beforeend', document.createElement('br'));
       list.replaceWith(paragraph);
       const fallbackRange = document.createRange();
       fallbackRange.selectNodeContents(paragraph);

@@ -776,13 +776,6 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 .board.is-compact .card-countdown>button { width:22px; height:22px; border-width:2px; box-shadow:1px 1px 0 #756b00; font-size:9px; }
 .board.is-compact .deadline-seal { width:18px; height:18px; border-width:2px; }
 .board.is-compact .deadline-seal::before,.board.is-compact .deadline-seal::after { width:11px; height:2px; }
-.board.is-compact .empty-state { height:82px; min-height:82px; gap:2px; }
-.board.is-compact .empty-state::before { width:96px; height:38px; border-width:2px; box-shadow:4px 4px 0 color-mix(in srgb,var(--doodle) 72%,transparent); }
-.board.is-compact .empty-state::after { right:calc(50% - 61px); top:7px; font-size:17px; }
-.board.is-compact .empty-state span { width:25px; height:25px; border-width:2px; box-shadow:2px 2px 0 var(--ink); font-size:16px; line-height:1; }
-.board.is-compact .empty-state strong { padding:2px 5px; border-width:1px; box-shadow:1px 1px 0 var(--doodle); font-size:8px; }
-.board.is-compact .empty-state small { display:none; }
-
 .theme-night .board-density-control { filter:drop-shadow(3px 3px 0 #080806); }
 .theme-night .column-sort-trigger { color:#080806; background:var(--night-text); border-color:#080806; box-shadow:3px 3px 0 var(--night-gold); }
 .theme-night .column-sort-trigger span { color:#675a17; }
