@@ -13,6 +13,7 @@ type DateFieldName = 'startedAt' | 'completedAt' | 'dueAt';
 type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
 type CountdownUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinute' | 'finalTen' | 'overdue';
 type CountdownKind = 'start' | 'deadline';
+type PendingSort = 'priority' | 'start' | 'deadline' | 'custom';
 type ArchiveFilterOption = { value: string; label: string; tone?: string };
 type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'in-progress' | 'completed';
 type DayScheduleBlock = { id: string; task: Task; startMinute: number; endMinute: number; labelStartMinute: number; labelEndMinute: number; lane: number; laneCount: number; offline: boolean; variant: ScheduleVariant; continuesBefore: boolean; continuesAfter: boolean; terminal: boolean };
@@ -76,8 +77,10 @@ const SETTINGS_KEY = 'sao-planner-settings-v1';
 const THEME_KEY = 'sao-planner-theme-v1';
 const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
 const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
+const PENDING_SORT_SESSION_KEY = 'sao-planner-pending-sort-v1';
 const VISIBLE_LIMIT: Record<Status, number> = { pending: 5, inProgress: 5, completed: 5 };
 const STATUS_ORDER: Record<Status, number> = { inProgress: 0, pending: 1, completed: 2 };
+const PRIORITY_ORDER: Record<Priority, number> = { must: 0, high: 1, medium: 2, low: 3 };
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const TYPE_COLOR_ORDER: Record<TypeColor, number> = { purple: 0, blue: 1, green: 2, yellow: 3 };
 const ACTION_DAY_START = 2 * 60;
@@ -192,6 +195,38 @@ function sortTasks(tasks: Task[], status: Status) {
     if (status === 'inProgress') return +new Date(b.startedAt || 0) - +new Date(a.startedAt || 0);
     return +new Date(b.completedAt || 0) - +new Date(a.completedAt || 0);
   });
+}
+
+function sortPendingTasks(tasks: Task[], sort: PendingSort) {
+  if (sort === 'custom') return sortTasks(tasks, 'pending');
+  return [...tasks].sort((a, b) => {
+    if (sort === 'priority') {
+      const priorityDifference = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      if (priorityDifference) return priorityDifference;
+    } else {
+      const aTime = sort === 'start' ? a.startedAt : a.dueAt;
+      const bTime = sort === 'start' ? b.startedAt : b.dueAt;
+      if (Boolean(aTime) !== Boolean(bTime)) return aTime ? -1 : 1;
+      if (aTime && bTime) {
+        const timeDifference = +new Date(aTime) - +new Date(bTime);
+        if (timeDifference) return timeDifference;
+      }
+      const priorityDifference = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      if (priorityDifference) return priorityDifference;
+    }
+    return b.index - a.index;
+  });
+}
+
+function pendingSortLabel(sort: PendingSort) {
+  if (sort === 'custom') return 'CUSTOM';
+  if (sort === 'start') return 'START TIME';
+  if (sort === 'deadline') return 'DEADLINE';
+  return 'PRIORITY';
+}
+
+function isPendingSort(value: string | null): value is PendingSort {
+  return value === 'custom' || value === 'priority' || value === 'start' || value === 'deadline';
 }
 
 function transitionTask(task: Task, next: Status): Task {
@@ -708,6 +743,7 @@ export default function Home() {
   const saveQueue = useRef(Promise.resolve());
   const reminderBands = useRef(new Map<string, CountdownUrgency>());
   const remindersReady = useRef(false);
+  const pendingSortRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>('board');
   const [viewRestored, setViewRestored] = useState(false);
   const [dialogStateRestored, setDialogStateRestored] = useState(false);
@@ -720,6 +756,12 @@ export default function Home() {
   const [pageMotion, setPageMotion] = useState<'idle' | 'exit' | 'enter'>('idle');
   const [pageDirection, setPageDirection] = useState<'forward' | 'backward'>('forward');
   const [showAll, setShowAll] = useState<Record<Status, boolean>>({ pending: false, inProgress: false, completed: false });
+  const [pendingSort, setPendingSort] = useState<PendingSort>(() => {
+    if (typeof window === 'undefined') return 'custom';
+    const savedSort = window.sessionStorage.getItem(PENDING_SORT_SESSION_KEY);
+    return isPendingSort(savedSort) ? savedSort : 'custom';
+  });
+  const [pendingSortOpen, setPendingSortOpen] = useState(false);
   const [showCompletedHistory, setShowCompletedHistory] = useState(false);
   const [draggingId, setDraggingId] = useState('');
   const [dropTarget, setDropTarget] = useState<Status | ''>('');
@@ -799,6 +841,11 @@ export default function Home() {
     if (!viewRestored) return;
     window.sessionStorage.setItem(VIEW_SESSION_KEY, view);
   }, [view, viewRestored]);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    window.sessionStorage.setItem(PENDING_SORT_SESSION_KEY, pendingSort);
+  }, [pendingSort, viewRestored]);
 
   useEffect(() => {
     if (!dialogStateRestored) return;
@@ -910,6 +957,21 @@ export default function Home() {
   }, [tasks, settings, theme, hydrated, saveRetry]);
   useEffect(() => { const interval = window.setInterval(() => setTasks((current) => processRecurring(current, settings.recurrenceEnabled)), 60_000); return () => window.clearInterval(interval); }, [settings.recurrenceEnabled]);
   useEffect(() => { const interval = window.setInterval(() => setClock(new Date()), 1_000); return () => window.clearInterval(interval); }, []);
+  useEffect(() => {
+    if (!pendingSortOpen) return;
+    const closeOnOutsidePress = (event: MouseEvent) => {
+      if (!pendingSortRef.current?.contains(event.target as Node)) setPendingSortOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingSortOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsidePress);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsidePress);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [pendingSortOpen]);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2200); return () => window.clearTimeout(timer); }, [toast]);
   useEffect(() => {
     if (!impact) return;
@@ -940,9 +1002,9 @@ export default function Home() {
   const grouped = useMemo(() => boardMeta.reduce((result, board) => {
     const today = localDateKey(new Date());
     const boardTasks = missionTasks.filter((task) => task.status === board.id && (board.id !== 'completed' || showCompletedHistory || (task.completedAt && localDateKey(new Date(task.completedAt)) === today)));
-    result[board.id] = sortTasks(boardTasks, board.id);
+    result[board.id] = board.id === 'pending' ? sortPendingTasks(boardTasks, pendingSort) : sortTasks(boardTasks, board.id);
     return result;
-  }, {} as Record<Status, Task[]>), [missionTasks, showCompletedHistory]);
+  }, {} as Record<Status, Task[]>), [missionTasks, showCompletedHistory, pendingSort]);
 
   const activeRecurringTasks = useMemo(() => {
     return tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none').sort((a, b) => a.index - b.index);
@@ -1007,7 +1069,7 @@ export default function Home() {
   };
 
   const reorderWithin = (status: Status, draggedId: string, targetId: string) => {
-    if (status === 'completed' || draggedId === targetId) return;
+    if (status === 'completed' || (status === 'pending' && pendingSort !== 'custom') || draggedId === targetId) return;
     setTasks((current) => {
       const ordered = sortTasks(current.filter((task) => !task.isRecurrenceTemplate && task.status === status), status);
       const from = ordered.findIndex((task) => task.id === draggedId);
@@ -1124,7 +1186,8 @@ export default function Home() {
     }, 420);
   };
   const now = clock;
-  const completedToday = missionTasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
+  const todayActionTasks = missionTasks.filter((task) => taskOccursInActionDay(task, localDateKey(now), now));
+  const completedToday = todayActionTasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
   const selectedDayTasks = missionTasks.filter((task) => taskOccursInActionDay(task, selectedDay, now)).sort((a, b) => +new Date(calendarTaskDate(a, now)) - +new Date(calendarTaskDate(b, now)));
   const dayScheduleBlocks = useMemo(() => layoutDaySchedule(selectedDayTasks, selectedDay, now), [selectedDayTasks, selectedDay, now]);
   const dayTimelineEntries = useMemo(() => selectedDayTasks.flatMap((task) => {
@@ -1167,7 +1230,7 @@ export default function Home() {
     <header className="hero">
       <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} username={settings.username} />
       <div className="day-card" aria-label="今日日期"><span>{new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now).toUpperCase()}</span><strong>{String(now.getDate()).padStart(2, '0')}</strong><em>{new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(now).toUpperCase()}</em></div>
-      <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {missionTasks.length}</small></strong><div className="summary-track"><i style={{ width: `${missionTasks.length ? Math.min(100, completedToday / missionTasks.length * 100) : 0}%` }} /></div></div>
+      <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {todayActionTasks.length}</small></strong><div className="summary-track"><i style={{ width: `${todayActionTasks.length ? Math.min(100, completedToday / todayActionTasks.length * 100) : 0}%` }} /></div></div>
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
@@ -1180,7 +1243,7 @@ export default function Home() {
       return <section className={`board-column ${dropTarget === board.id ? 'is-target' : ''}`} key={board.id}
         onDragOver={(event) => { event.preventDefault(); setDropTarget(board.id); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(''); }}
         onDrop={(event) => { event.preventDefault(); if (draggingId) moveTask(draggingId, board.id); }}>
-        <header className="column-header"><span className="column-index">{board.index}</span><div><h2>{board.title}</h2><p>{board.subtitle}</p></div><strong>{String(boardTasks.length).padStart(2, '0')}</strong></header>
+        <header className="column-header"><span className="column-index">{board.index}</span><div><h2>{board.title}</h2><div className="column-subline"><p>{board.subtitle}</p>{board.id === 'pending' && <div className="pending-sort" ref={pendingSortRef}><button type="button" className="column-sort-trigger" aria-haspopup="menu" aria-expanded={pendingSortOpen} onClick={() => setPendingSortOpen((open) => !open)}><span>SORT</span><strong>{pendingSortLabel(pendingSort)}</strong><i>⌄</i></button>{pendingSortOpen && <div className="pending-sort-menu" role="menu" aria-label="等待行动排序方式">{([['custom', '自定义顺序'], ['priority', '优先级'], ['start', '开始时间'], ['deadline', '截止时间']] as [PendingSort, string][]).map(([value, label], index) => <button key={value} type="button" role="menuitemradio" aria-checked={pendingSort === value} className={pendingSort === value ? 'active' : ''} onClick={() => { setPendingSort(value); setPendingSortOpen(false); }}><span>{String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><i>{pendingSort === value ? '●' : '○'}</i></button>)}</div>}</div>}</div></div><strong>{String(boardTasks.length).padStart(2, '0')}</strong></header>
         <div className="task-stack">{visible.map((task) => <TaskCard key={task.id} task={task} color={typeColor(task.taskType, settings)} now={now} dragging={draggingId === task.id} landed={landedId === task.id}
           onStart={() => moveTask(task.id, 'inProgress')}
           onOpen={() => setDraft(task)} onDragStart={(event) => { setDraggingId(task.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.id); }} onDragEnd={() => { setDraggingId(''); setDropTarget(''); }}
