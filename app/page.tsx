@@ -733,6 +733,17 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     selection?.removeAllRanges();
     selection?.addRange(range);
   };
+  const placeCaretAtChecklistTextEnd = (item: HTMLLIElement) => {
+    normalizeChecklistItem(item);
+    const entry = Array.from(item.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    const range = document.createRange();
+    if (entry) range.selectNodeContents(entry);
+    else range.selectNodeContents(item);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
   const replaceList = (list: HTMLUListElement | HTMLOListElement, tagName: 'ul' | 'ol', checklist = false) => {
     const replacement = document.createElement(tagName);
     if (checklist) replacement.classList.add('checklist');
@@ -799,6 +810,42 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     rememberSelection();
     onChange(editorRef.current.innerHTML);
   };
+  const deleteEmptyChecklistItem = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Backspace' || !editorRef.current) return;
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return;
+    const anchor = selection.anchorNode;
+    const element = anchor instanceof HTMLElement ? anchor : anchor?.parentElement;
+    const item = element?.closest('li');
+    if (!(item instanceof HTMLLIElement) || !editorRef.current.contains(item) || !item.parentElement?.matches('ul.checklist')) return;
+    const entry = Array.from(item.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    if (!entry || entry.textContent?.trim()) return;
+    const beforeCaret = range.cloneRange();
+    beforeCaret.selectNodeContents(entry);
+    beforeCaret.setEnd(range.startContainer, range.startOffset);
+    if (beforeCaret.toString().replaceAll('\u00a0', '').trim()) return;
+    event.preventDefault();
+    const previousItem = item.previousElementSibling;
+    const nextItem = item.nextElementSibling;
+    const list = item.parentElement;
+    item.remove();
+    if (previousItem instanceof HTMLLIElement) placeCaretAtChecklistTextEnd(previousItem);
+    else if (nextItem instanceof HTMLLIElement) placeCaretAtChecklistTextStart(nextItem);
+    else if (list instanceof HTMLUListElement) {
+      const paragraph = document.createElement('div');
+      paragraph.append(document.createElement('br'));
+      list.replaceWith(paragraph);
+      const fallbackRange = document.createRange();
+      fallbackRange.selectNodeContents(paragraph);
+      fallbackRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(fallbackRange);
+    }
+    rememberSelection();
+    onChange(editorRef.current.innerHTML);
+  };
   const focusEmptyChecklistItem = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!editorRef.current || event.target instanceof HTMLInputElement) return;
     const target = event.target instanceof Element ? event.target : null;
@@ -817,7 +864,7 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     <button type="button" title="项目符号" aria-label="项目符号" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertUnorderedList')}>• ≡</button>
     <button type="button" title="编号列表" aria-label="编号列表" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertOrderedList')}>1 ≡</button>
     <button type="button" title="待办清单" aria-label="待办清单" onMouseDown={(event) => event.preventDefault()} onClick={() => format('checklist')}>☑ ≡</button>
-  </div><div ref={editorRef} className="rich-description-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="补充任务背景、完成标准或下一步…" onFocus={rememberSelection} onMouseDown={focusEmptyChecklistItem} onKeyDown={continueChecklist} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onClick={(event) => { const target = event.target; if (target instanceof HTMLInputElement && target.type === 'checkbox') { target.toggleAttribute('checked', target.checked); onChange(editorRef.current?.innerHTML ?? ''); } }} onInput={() => { rememberSelection(); onChange(editorRef.current?.innerHTML ?? ''); }} /></div>;
+  </div><div ref={editorRef} className="rich-description-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="补充任务背景、完成标准或下一步…" onFocus={rememberSelection} onMouseDown={focusEmptyChecklistItem} onKeyDown={(event) => { continueChecklist(event); if (!event.defaultPrevented) deleteEmptyChecklistItem(event); }} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onClick={(event) => { const target = event.target; if (target instanceof HTMLInputElement && target.type === 'checkbox') { target.toggleAttribute('checked', target.checked); onChange(editorRef.current?.innerHTML ?? ''); } }} onInput={() => { rememberSelection(); onChange(editorRef.current?.innerHTML ?? ''); }} /></div>;
 }
 
 function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragStart, onDragEnd, onDragOver, onDrop }: {
