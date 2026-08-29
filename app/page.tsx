@@ -1010,20 +1010,29 @@ export default function Home() {
     return tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none').sort((a, b) => a.index - b.index);
   }, [tasks]);
 
-  const filteredTable = useMemo(() => missionTasks.filter((task) => {
+  const filteredTable = useMemo(() => {
     const query = tableQuery.trim().toLowerCase();
-    return (!query || `${task.title} ${task.description} ${task.taskType} ${task.location}`.toLowerCase().includes(query))
+    const matchingTasks = missionTasks.filter((task) => (
+      (!query || `${task.title} ${task.description} ${task.taskType} ${task.location}`.toLowerCase().includes(query))
       && (tableStatus === 'all' || task.status === tableStatus)
       && (tableType === 'all' || task.taskType === tableType)
       && (tablePriority === 'all' || task.priority === tablePriority)
-      && (!tableDate || taskOccursInActionDay(task, tableDate, clock));
-  }).sort((a, b) => {
-    const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-    if (statusDiff) return statusDiff;
-    if (Boolean(a.dueAt) !== Boolean(b.dueAt)) return a.dueAt ? -1 : 1;
-    if (a.dueAt && b.dueAt) return +new Date(a.dueAt) - +new Date(b.dueAt);
-    return b.index - a.index;
-  }), [missionTasks, tableQuery, tableStatus, tableType, tablePriority, tableDate, clock]);
+      && (!tableDate || taskOccursInActionDay(task, tableDate, clock))
+    ));
+    const pendingRanks = new Map(sortPendingTasks(matchingTasks.filter((task) => task.status === 'pending'), pendingSort).map((task, index) => [task.id, index]));
+    return matchingTasks.sort((a, b) => {
+      const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+      if (statusDiff) return statusDiff;
+      if (a.status === 'pending') return (pendingRanks.get(a.id) ?? 0) - (pendingRanks.get(b.id) ?? 0);
+      if (Boolean(a.dueAt) !== Boolean(b.dueAt)) return a.dueAt ? -1 : 1;
+      if (a.dueAt && b.dueAt) {
+        const dayDifference = localDateKey(new Date(b.dueAt)).localeCompare(localDateKey(new Date(a.dueAt)));
+        if (dayDifference) return dayDifference;
+        return +new Date(a.dueAt) - +new Date(b.dueAt);
+      }
+      return b.index - a.index;
+    });
+  }, [missionTasks, pendingSort, tableQuery, tableStatus, tableType, tablePriority, tableDate, clock]);
 
   const calendarDays = useMemo(() => {
     const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
