@@ -675,24 +675,139 @@ function ArchiveDateFilter({ value, onChange }: { value: string; onChange: (valu
 function RichTextDescription({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
+  const createChecklistInput = () => {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.contentEditable = 'false';
+    input.setAttribute('aria-label', '完成清单项');
+    return input;
+  };
+  const createChecklistItem = () => {
+    const item = document.createElement('li');
+    const entry = document.createElement('span');
+    entry.className = 'checklist-entry';
+    entry.textContent = '\u00a0';
+    item.append(createChecklistInput(), entry);
+    return item;
+  };
+  const normalizeChecklistItem = (item: HTMLLIElement) => {
+    const checkbox = Array.from(item.children).find((child): child is HTMLInputElement => child instanceof HTMLInputElement && child.type === 'checkbox');
+    if (!checkbox) return;
+    const existingEntry = Array.from(item.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    if (existingEntry) return;
+    const entry = document.createElement('span');
+    entry.className = 'checklist-entry';
+    Array.from(item.childNodes).filter((node) => node !== checkbox).forEach((node) => entry.append(node));
+    if (!entry.childNodes.length) entry.textContent = '\u00a0';
+    item.append(entry);
+  };
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== descriptionMarkup(value)) editorRef.current.innerHTML = descriptionMarkup(value);
+    editorRef.current?.querySelectorAll<HTMLLIElement>('ul.checklist > li').forEach(normalizeChecklistItem);
   }, [value]);
   const rememberSelection = () => {
     const selection = window.getSelection();
     if (!selection?.rangeCount || !editorRef.current?.contains(selection.anchorNode)) return;
     selectionRef.current = selection.getRangeAt(0).cloneRange();
   };
-  const format = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList' | 'insertOrderedList') => {
-    editorRef.current?.focus();
+  const restoreSelection = () => {
     const selection = window.getSelection();
-    if (selectionRef.current && selection) {
-      selection.removeAllRanges();
-      selection.addRange(selectionRef.current);
-    }
-    document.execCommand(command);
+    if (!selectionRef.current || !selection) return;
+    selection.removeAllRanges();
+    selection.addRange(selectionRef.current);
+  };
+  const selectedLists = () => {
+    const selection = window.getSelection();
+    if (!editorRef.current || !selection?.rangeCount) return [] as (HTMLUListElement | HTMLOListElement)[];
+    const range = selection.getRangeAt(0);
+    return Array.from(editorRef.current.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol')).filter((list) => range.intersectsNode(list));
+  };
+  const placeCaretAtChecklistTextStart = (item: HTMLLIElement) => {
+    normalizeChecklistItem(item);
+    const entry = Array.from(item.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    const range = document.createRange();
+    if (entry) range.selectNodeContents(entry);
+    else range.setStart(item, Math.min(1, item.childNodes.length));
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+  const replaceList = (list: HTMLUListElement | HTMLOListElement, tagName: 'ul' | 'ol', checklist = false) => {
+    const replacement = document.createElement(tagName);
+    if (checklist) replacement.classList.add('checklist');
+    replacement.innerHTML = list.innerHTML;
+    Array.from(replacement.children).filter((item): item is HTMLLIElement => item instanceof HTMLLIElement).forEach((item) => {
+      const checkbox = Array.from(item.children).find((child): child is HTMLInputElement => child instanceof HTMLInputElement && child.type === 'checkbox');
+      if (checklist && !checkbox) {
+        item.prepend(createChecklistInput());
+      }
+      if (checklist) normalizeChecklistItem(item);
+      if (!checklist) checkbox?.remove();
+    });
+    list.replaceWith(replacement);
+    return replacement;
+  };
+  const format = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList' | 'insertOrderedList' | 'checklist') => {
+    editorRef.current?.focus();
+    restoreSelection();
+    let lists = selectedLists();
+    if (command === 'checklist') {
+      if (!lists.length) {
+        document.execCommand('insertUnorderedList');
+        lists = selectedLists();
+      }
+      const replacements = lists.map((list) => replaceList(list, 'ul', true));
+      const replacement = replacements.at(-1);
+      if (replacement) {
+        const range = document.createRange();
+        range.selectNodeContents(replacement);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    } else if (command === 'insertUnorderedList' || command === 'insertOrderedList') {
+      if (lists.length) {
+        const replacements = lists.map((list) => replaceList(list, command === 'insertUnorderedList' ? 'ul' : 'ol'));
+        const replacement = replacements.at(-1);
+        if (replacement) {
+          const range = document.createRange();
+          range.selectNodeContents(replacement);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      }
+      else document.execCommand(command);
+    } else document.execCommand(command);
     rememberSelection();
     onChange(editorRef.current?.innerHTML ?? '');
+  };
+  const continueChecklist = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || !editorRef.current) return;
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode;
+    const element = anchor instanceof HTMLElement ? anchor : anchor?.parentElement;
+    const item = element?.closest('li');
+    if (!(item instanceof HTMLLIElement) || !editorRef.current.contains(item) || !item.parentElement?.matches('ul.checklist')) return;
+    event.preventDefault();
+    const nextItem = createChecklistItem();
+    item.after(nextItem);
+    placeCaretAtChecklistTextStart(nextItem);
+    rememberSelection();
+    onChange(editorRef.current.innerHTML);
+  };
+  const focusEmptyChecklistItem = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!editorRef.current || event.target instanceof HTMLInputElement) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const item = target?.closest('li');
+    if (!(item instanceof HTMLLIElement) || !editorRef.current.contains(item) || !item.parentElement?.matches('ul.checklist') || item.textContent?.trim()) return;
+    event.preventDefault();
+    editorRef.current.focus();
+    placeCaretAtChecklistTextStart(item);
+    rememberSelection();
   };
   return <div className="field field-wide rich-description-field"><span>Description / 描述</span><div className="rich-text-toolbar" role="toolbar" aria-label="描述文字格式">
     <button type="button" title="加粗" aria-label="加粗" onMouseDown={(event) => event.preventDefault()} onClick={() => format('bold')}><b>B</b></button>
@@ -701,7 +816,8 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     <span aria-hidden="true" />
     <button type="button" title="项目符号" aria-label="项目符号" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertUnorderedList')}>• ≡</button>
     <button type="button" title="编号列表" aria-label="编号列表" onMouseDown={(event) => event.preventDefault()} onClick={() => format('insertOrderedList')}>1 ≡</button>
-  </div><div ref={editorRef} className="rich-description-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="补充任务背景、完成标准或下一步…" onFocus={rememberSelection} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onInput={() => { rememberSelection(); onChange(editorRef.current?.innerHTML ?? ''); }} /></div>;
+    <button type="button" title="待办清单" aria-label="待办清单" onMouseDown={(event) => event.preventDefault()} onClick={() => format('checklist')}>☑ ≡</button>
+  </div><div ref={editorRef} className="rich-description-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="补充任务背景、完成标准或下一步…" onFocus={rememberSelection} onMouseDown={focusEmptyChecklistItem} onKeyDown={continueChecklist} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onClick={(event) => { const target = event.target; if (target instanceof HTMLInputElement && target.type === 'checkbox') { target.toggleAttribute('checked', target.checked); onChange(editorRef.current?.innerHTML ?? ''); } }} onInput={() => { rememberSelection(); onChange(editorRef.current?.innerHTML ?? ''); }} /></div>;
 }
 
 function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragStart, onDragEnd, onDragOver, onDrop }: {
@@ -787,6 +903,7 @@ export default function Home() {
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
+  const [repeaterDraggingId, setRepeaterDraggingId] = useState('');
   const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
 
   useEffect(() => {
@@ -1007,7 +1124,9 @@ export default function Home() {
   }, {} as Record<Status, Task[]>), [missionTasks, showCompletedHistory, pendingSort]);
 
   const activeRecurringTasks = useMemo(() => {
-    return tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none').sort((a, b) => a.index - b.index);
+    const recurringTasks = tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none');
+    const hasManualOrder = recurringTasks.some((task) => task.manualOrder !== null);
+    return [...recurringTasks].sort((a, b) => hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index);
   }, [tasks]);
 
   const filteredTable = useMemo(() => {
@@ -1100,6 +1219,22 @@ export default function Home() {
     setImpact({ title: 'ORDER LOCKED!', subtitle: '自定义任务顺序已保存' });
     setDraggingId('');
     setDropTarget('');
+  };
+
+  const reorderRepeaters = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    setTasks((current) => {
+      const recurringTasks = current.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none');
+      const hasManualOrder = recurringTasks.some((task) => task.manualOrder !== null);
+      const ordered = [...recurringTasks].sort((a, b) => hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index);
+      const from = ordered.findIndex((task) => task.id === draggedId);
+      const to = ordered.findIndex((task) => task.id === targetId);
+      if (from < 0 || to < 0) return current;
+      const [moved] = ordered.splice(from, 1);
+      ordered.splice(to, 0, moved);
+      const ranks = new Map(ordered.map((task, index) => [task.id, index]));
+      return current.map((task) => task.isRecurrenceTemplate && task.recurrence !== 'none' ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
+    });
   };
 
   const saveDraft = (event: FormEvent) => {
@@ -1307,7 +1442,7 @@ export default function Home() {
             </section>
             <section className="repeat-roster">
               <header><div><span>ACTIVE REPEATERS</span><strong>{activeRecurringTasks.length} 个循环任务</strong></div><div className="repeat-roster-actions"><button type="button" className="add-repeater" onClick={openNewRecurringTask}>＋ 添加循环任务</button>{activeRecurringTasks.length > 0 && <button type="button" className="toggle-repeaters" aria-expanded={repeatersExpanded} aria-controls="active-repeaters-list" onClick={() => setRepeatersExpanded((current) => !current)}>{repeatersExpanded ? '收起 ↑' : '展开 ↓'}</button>}</div></header>
-              {repeatersExpanded && (activeRecurringTasks.length ? <div className="recurrence-series-list" id="active-repeaters-list">{activeRecurringTasks.map((task) => <article key={task.id} className="recurrence-series-item status-pending"><i aria-hidden="true">↻</i><div><strong>{task.title}</strong><span>{recurrenceLabel(task)} · 模板 {task.startedAt ? formatTime(task.startedAt, false) : '未设置开始'} → {task.dueAt ? formatTime(task.dueAt, false) : '未设置截止'}</span></div><button type="button" onClick={() => setDraft(task)}>编辑模板</button><button type="button" className="stop-repeat" onClick={() => stopRecurringTask(task.seriesId)}>关闭循环</button></article>)}</div> : <div className="recurrence-empty"><strong>NO ACTIVE LOOPS</strong><span>尚无循环任务。创建后会在这里持续显示。</span></div>)}
+              {repeatersExpanded && (activeRecurringTasks.length ? <div className="recurrence-series-list" id="active-repeaters-list">{activeRecurringTasks.map((task) => <article key={task.id} draggable className={`recurrence-series-item status-pending ${repeaterDraggingId === task.id ? 'is-dragging' : ''}`} onDragStart={(event) => { setRepeaterDraggingId(task.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.id); }} onDragEnd={() => setRepeaterDraggingId('')} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (repeaterDraggingId) reorderRepeaters(repeaterDraggingId, task.id); setRepeaterDraggingId(''); }}><span className="repeat-drag-handle" aria-hidden="true">⠿</span><i aria-hidden="true">↻</i><div><strong>{task.title}</strong><span>{recurrenceLabel(task)} · 模板 {task.startedAt ? formatTime(task.startedAt, false) : '未设置开始'} → {task.dueAt ? formatTime(task.dueAt, false) : '未设置截止'}</span></div><button type="button" onClick={() => setDraft(task)}>编辑模板</button><button type="button" className="stop-repeat" onClick={() => stopRecurringTask(task.seriesId)}>关闭循环</button></article>)}</div> : <div className="recurrence-empty"><strong>NO ACTIVE LOOPS</strong><span>尚无循环任务。创建后会在这里持续显示。</span></div>)}
             </section>
           </div>
         </section>
