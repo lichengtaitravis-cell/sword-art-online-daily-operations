@@ -1024,11 +1024,18 @@ export default function Home() {
       const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
       if (statusDiff) return statusDiff;
       if (a.status === 'pending') return (pendingRanks.get(a.id) ?? 0) - (pendingRanks.get(b.id) ?? 0);
-      if (Boolean(a.dueAt) !== Boolean(b.dueAt)) return a.dueAt ? -1 : 1;
-      if (a.dueAt && b.dueAt) {
-        const dayDifference = localDateKey(new Date(b.dueAt)).localeCompare(localDateKey(new Date(a.dueAt)));
+      const aSortTime = a.status === 'completed' ? a.completedAt : a.dueAt;
+      const bSortTime = b.status === 'completed' ? b.completedAt : b.dueAt;
+      if (Boolean(aSortTime) !== Boolean(bSortTime)) return aSortTime ? -1 : 1;
+      if (aSortTime && bSortTime) {
+        const dayDifference = localDateKey(new Date(bSortTime)).localeCompare(localDateKey(new Date(aSortTime)));
         if (dayDifference) return dayDifference;
-        return +new Date(a.dueAt) - +new Date(b.dueAt);
+        const timeDifference = +new Date(aSortTime) - +new Date(bSortTime);
+        if (timeDifference) return timeDifference;
+      }
+      if (a.status === 'inProgress') {
+        const priorityDifference = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+        if (priorityDifference) return priorityDifference;
       }
       return b.index - a.index;
     });
@@ -1273,7 +1280,7 @@ export default function Home() {
         <ArchiveDateFilter value={tableDate} onChange={setTableDate} />
       </div>
       <div className="archive-table-wrap"><table className="archive-table"><thead><tr><th>INDEX</th><th>任务名称</th><th>任务描述</th><th>状态</th><th>任务类型</th><th>优先级</th><th>截止时间</th><th>开始时间</th><th>完成时间</th><th>地点</th></tr></thead><tbody>{filteredTable.map((task, rowIndex) => <tr key={task.id} onClick={() => setDraft(task)}><td className="table-index">{rowIndex + 1}</td><td><strong>{task.title}</strong>{task.recurrence !== 'none' && <span className="table-repeat">↻</span>}</td><td className="description-data">{descriptionToText(task.description) || '—'}</td><td><span className={`status-chip status-${task.status}`}>{statusLabel(task.status)}</span></td><td><span className={`type-chip type-${typeColor(task.taskType, settings)}`}><i />{task.taskType}</span></td><td><span className={`priority-chip priority-${task.priority}`}>{task.priority === 'must' ? 'MUST' : task.priority.toUpperCase()}</span></td><td className="time-data">{formatTime(task.dueAt)}</td><td className="time-data">{formatTime(task.startedAt)}</td><td className="time-data">{formatTime(task.completedAt)}</td><td>{task.location}</td></tr>)}</tbody></table>{!filteredTable.length && <div className="no-results">NO MATCHING MISSIONS / 没有匹配任务</div>}</div>
-      <p className="sort-note">INDEX 是当前筛选结果的行号；默认先按状态排列，同状态任务再按截止时间排列。</p>
+      <p className="sort-note">INDEX 是当前筛选结果的行号；任务先按行动状态编组，各状态内部会依照对应的行动规则自动编队。</p>
     </section>}
 
     {view === 'calendar' && <section className="calendar-page">
@@ -1336,7 +1343,7 @@ export default function Home() {
     {draft && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDraft(null); }}><form className="task-modal" onSubmit={saveDraft} role="dialog" aria-modal="true" aria-labelledby="task-dialog-title">
       <header className={`modal-header type-${typeColor(draft.taskType, settings)}`}><div><span>{draft.isRecurrenceTemplate ? 'REPEAT PROTOCOL' : 'MISSION DATA'}</span><h2 id="task-dialog-title">{draft.isRecurrenceTemplate ? '循环任务配置' : '任务详情'}</h2></div><button type="button" className="close-button" aria-label="关闭" onClick={() => setDraft(null)}>×</button></header>
       <div className="modal-body"><label className="field field-wide"><span>Title / 标题</span><input autoFocus value={draft.title} placeholder="这次要攻略什么？" onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label><RichTextDescription value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
-        <div className="form-grid">{!draft.isRecurrenceTemplate && <ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} />}<ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Start / 循环开始' : 'Start / 开始时间'} value={draft.startedAt} onClick={() => openDatePicker('startedAt')} />{!draft.isRecurrenceTemplate && <DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} />}<DateChoice label={draft.isRecurrenceTemplate ? 'Planned Deadline / 循环截止' : 'Deadline / 截止时间'} value={draft.dueAt} onClick={() => openDatePicker('dueAt')} /><ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
+        <div className="form-grid">{!draft.isRecurrenceTemplate && <ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} />}<ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Start / 循环开始' : 'Start / 开始时间'} value={draft.startedAt} onClick={() => openDatePicker('startedAt')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Deadline / 循环截止' : 'Deadline / 截止时间'} value={draft.dueAt} onClick={() => openDatePicker('dueAt')} />{!draft.isRecurrenceTemplate && <DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} />}<ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
         {draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
         {draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 这里保存独立循环模板；修改当天生成的任务不会改变本模板。</p>}
         {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；修改开始或截止时间后，仅本次任务会脱离循环，模板保持不变。</p>}
