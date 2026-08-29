@@ -1447,9 +1447,12 @@ export default function Home() {
       {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
-    {view === 'board' && <div className="board-density-control" role="group" aria-label="任务卡片显示方式">
-      <button type="button" aria-pressed={boardDensity === 'standard'} onClick={() => { setBoardDensity('standard'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">▦</i><strong>STANDARD</strong><small>标准</small></button>
-      <button type="button" aria-pressed={boardDensity === 'compact'} onClick={() => { setBoardDensity('compact'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">≡</i><strong>COMPACT</strong><small>缩略</small></button>
+    {view === 'board' && <div className="board-control-rack">
+      <button type="button" className="daily-flow-shortcut" onClick={() => { setSelectedDay(localDateKey(now)); setLinkedScheduleTaskId(''); setDayAgendaOpen(true); }}><i aria-hidden="true">▥</i><strong>DAILY FLOW</strong><small>今日战线</small></button>
+      <div className="board-density-control" role="group" aria-label="任务卡片显示方式">
+        <button type="button" aria-pressed={boardDensity === 'standard'} onClick={() => { setBoardDensity('standard'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">▦</i><strong>STANDARD</strong><small>标准</small></button>
+        <button type="button" aria-pressed={boardDensity === 'compact'} onClick={() => { setBoardDensity('compact'); setShowAll({ pending: false, inProgress: false, completed: false }); }}><i aria-hidden="true">≡</i><strong>COMPACT</strong><small>缩略</small></button>
+      </div>
     </div>}
 
     {view === 'board' && visibleCountdowns.length > 0 && <section className={`countdown-hud-stack ${visibleCountdowns.length === 1 ? 'is-single' : ''}`} aria-label="当前任务倒计时">{visibleCountdowns.map((signal) => <article key={`${signal.task.id}-${signal.kind}`} className={`countdown-alert countdown-${signal.kind} urgency-${signal.urgency}`}><span><b>{signal.kind === 'start' ? '▶ START' : '⊘ TABOO'}</b><small>{countdownSignalLabel(signal)}</small></span><div><strong>{signal.task.title}</strong><small>{formatTime(signal.targetAt, false)} · {signal.kind === 'start' ? 'MOVE TO IN PROGRESS' : 'DEADLINE LOCK'}</small></div><time>{countdownText(signal.targetAt, now)}</time><button type="button" onClick={() => signal.kind === 'start' ? moveTask(signal.task.id, 'inProgress') : setDraft(signal.task)}>{signal.kind === 'start' ? '▶ START' : 'OPEN ›'}</button></article>)}{activeCountdowns.length > visibleCountdowns.length && <div className="countdown-overflow">＋{activeCountdowns.length - visibleCountdowns.length} MORE SIGNALS / 更多倒计时</div>}</section>}
