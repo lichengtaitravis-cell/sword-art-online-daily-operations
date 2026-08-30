@@ -62,6 +62,7 @@ type PlannerSettings = {
   defaultTaskType: string;
   defaultLocation: string;
   recurrenceEnabled: boolean;
+  recurrenceOrder: string[];
 };
 
 const BASE_TYPES: PlannerSettings['taskTypes'] = [
@@ -71,7 +72,7 @@ const BASE_TYPES: PlannerSettings['taskTypes'] = [
   ...['🏃‍➡️ 运动', '🧘 冥想', '🎈 聚会', '🎮 娱乐', '🛏️ 休息'].map((value) => ({ value, color: 'yellow' as const })),
 ];
 const BASE_LOCATIONS = ['🏠 家', '🏢 公司', '🏫 学校', '💻 线上', '🏃 户外', '✈️ 机场', '🚉 车站', '🛒 超市', '📍 其他'].map((value) => ({ value }));
-const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家', recurrenceEnabled: true };
+const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家', recurrenceEnabled: true, recurrenceOrder: [] };
 const TASK_KEY = 'sao-planner-tasks-v2';
 const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
 const SETTINGS_KEY = 'sao-planner-settings-v1';
@@ -107,6 +108,7 @@ function normalizeSettings(raw: Partial<PlannerSettings> | null | undefined): Pl
     defaultTaskType: typeof merged.defaultTaskType === 'string' ? merged.defaultTaskType : DEFAULT_SETTINGS.defaultTaskType,
     defaultLocation: typeof merged.defaultLocation === 'string' ? merged.defaultLocation : DEFAULT_SETTINGS.defaultLocation,
     recurrenceEnabled: merged.recurrenceEnabled !== false,
+    recurrenceOrder: Array.isArray(merged.recurrenceOrder) ? [...new Set(merged.recurrenceOrder.filter((seriesId): seriesId is string => typeof seriesId === 'string' && seriesId.length > 0))] : [],
   };
 }
 
@@ -1206,9 +1208,15 @@ export default function Home() {
 
   const activeRecurringTasks = useMemo(() => {
     const recurringTasks = tasks.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none');
+    const recurrenceRanks = new Map(settings.recurrenceOrder.map((seriesId, index) => [seriesId, index]));
     const hasManualOrder = recurringTasks.some((task) => task.manualOrder !== null);
-    return [...recurringTasks].sort((a, b) => hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index);
-  }, [tasks]);
+    return [...recurringTasks].sort((a, b) => {
+      const aRank = recurrenceRanks.get(a.seriesId || a.id);
+      const bRank = recurrenceRanks.get(b.seriesId || b.id);
+      if (aRank !== undefined || bRank !== undefined) return (aRank ?? Number.MAX_SAFE_INTEGER) - (bRank ?? Number.MAX_SAFE_INTEGER);
+      return hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index;
+    });
+  }, [settings.recurrenceOrder, tasks]);
 
   const filteredTable = useMemo(() => {
     const query = tableQuery.trim().toLowerCase();
@@ -1304,18 +1312,18 @@ export default function Home() {
 
   const reorderRepeaters = (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
+    const ordered = [...activeRecurringTasks];
+    const from = ordered.findIndex((task) => task.id === draggedId);
+    const to = ordered.findIndex((task) => task.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1);
+    ordered.splice(to, 0, moved);
+    const orderedSeries = ordered.map((task) => task.seriesId || task.id);
+    const ranks = new Map(orderedSeries.map((seriesId, index) => [seriesId, index]));
     setTasks((current) => {
-      const recurringTasks = current.filter((task) => task.isRecurrenceTemplate && task.recurrence !== 'none');
-      const hasManualOrder = recurringTasks.some((task) => task.manualOrder !== null);
-      const ordered = [...recurringTasks].sort((a, b) => hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index);
-      const from = ordered.findIndex((task) => task.id === draggedId);
-      const to = ordered.findIndex((task) => task.id === targetId);
-      if (from < 0 || to < 0) return current;
-      const [moved] = ordered.splice(from, 1);
-      ordered.splice(to, 0, moved);
-      const ranks = new Map(ordered.map((task, index) => [task.id, index]));
-      return current.map((task) => task.isRecurrenceTemplate && task.recurrence !== 'none' ? { ...task, manualOrder: ranks.get(task.id) ?? null } : task);
+      return current.map((task) => task.isRecurrenceTemplate && task.recurrence !== 'none' ? { ...task, manualOrder: ranks.get(task.seriesId || task.id) ?? null } : task);
     });
+    setSettings((current) => ({ ...current, recurrenceOrder: orderedSeries }));
   };
 
   const saveDraft = (event: FormEvent) => {
