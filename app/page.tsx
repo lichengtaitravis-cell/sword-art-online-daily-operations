@@ -730,7 +730,13 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     const selection = window.getSelection();
     if (!editorRef.current || !selection?.rangeCount) return [] as (HTMLUListElement | HTMLOListElement)[];
     const range = selection.getRangeAt(0);
-    return Array.from(editorRef.current.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol')).filter((list) => range.intersectsNode(list));
+    const anchorElement = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
+    const activeList = anchorElement?.closest('ul,ol');
+    const intersectingLists = Array.from(editorRef.current.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol')).filter((list) => range.intersectsNode(list));
+    if ((activeList instanceof HTMLUListElement || activeList instanceof HTMLOListElement) && editorRef.current.contains(activeList)) {
+      return [...new Set([activeList, ...intersectingLists])];
+    }
+    return intersectingLists;
   };
   const placeCaretAtChecklistTextStart = (item: HTMLLIElement) => {
     normalizeChecklistItem(item);
@@ -775,8 +781,16 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     let lists = selectedLists();
     if (command === 'checklist') {
       if (!lists.length) {
+        const existingLists = new Set(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol'));
         document.execCommand('insertUnorderedList');
         lists = selectedLists();
+        // Empty contenteditables can lose their selection during execCommand.
+        // In that case, target the list that this command just created instead
+        // of leaving its browser-default bullet styling in place.
+        if (!lists.length) {
+          lists = Array.from(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol') ?? [])
+            .filter((list) => !existingLists.has(list));
+        }
       }
       const replacements = lists.map((list) => replaceList(list, 'ul', true));
       const replacement = replacements.at(-1);
