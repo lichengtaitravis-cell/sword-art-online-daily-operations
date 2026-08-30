@@ -253,6 +253,8 @@ button { color:inherit; }
 .archive-filter-option.active { color:var(--ink); background:var(--yellow); border-color:white; box-shadow:3px 3px 0 white; transform:translateX(2px); }
 .archive-filter-option.tone-purple { --option-accent:var(--purple); }.archive-filter-option.tone-blue { --option-accent:var(--blue); }.archive-filter-option.tone-green { --option-accent:var(--green); }.archive-filter-option.tone-yellow { --option-accent:#d2ad00; }
 .archive-filter-option.tone-must { --option-accent:var(--red); }.archive-filter-option.tone-high { --option-accent:#f07828; }.archive-filter-option.tone-medium { --option-accent:var(--yellow); }.archive-filter-option.tone-low { --option-accent:#b9b9ad; }
+.archive-filter-option.tone-inProgress { --option-accent:var(--blue); }.archive-filter-option.tone-pending { --option-accent:#d2ad00; }.archive-filter-option.tone-completed { --option-accent:var(--green); }
+.archive-filter-option.tone-inProgress.active { background:#cfe6fb; }.archive-filter-option.tone-pending.active { background:#fff0a1; }.archive-filter-option.tone-completed.active { background:#d4efdd; }
 @keyframes archiveFilterPop { from { opacity:0; transform:translateY(-8px) scaleY(.88) skewX(4deg); transform-origin:top; } to { opacity:1; transform:none; } }
 .archive-table-wrap { overflow:auto; max-height:calc(100vh - 330px); min-height:330px; background:rgba(255,255,255,.84); border:4px solid var(--ink); box-shadow:7px 7px 0 var(--ink); scrollbar-color:var(--yellow) var(--ink); scrollbar-width:auto; }
 .archive-table-wrap::-webkit-scrollbar { width:16px; height:16px; }
@@ -628,9 +630,11 @@ button { color:inherit; }
 /* Mission archive descriptions */
 .archive-table { min-width:1380px; }.archive-table td { font-variant-east-asian:proportional-width; }.archive-table .description-data { min-width:260px; max-width:360px; color:#57534e; font-family:var(--font-body); font-weight:500; letter-spacing:0; line-height:1.6; white-space:normal; }.theme-night .archive-table .description-data { color:var(--night-muted); }.theme-night .profile-console input { color:var(--night-text); background:var(--night-control); border-color:var(--night-line); }
 
-/* Status stays semantic, not a traffic-light recolor of mission surfaces. */
-.archive-table .status-chip.status-pending,.archive-table .status-chip.status-inProgress,.archive-table .status-chip.status-completed { color:var(--ink); background:var(--paper); border-color:var(--ink); border-left-color:var(--ink); }
-.theme-night .archive-table .status-chip.status-pending,.theme-night .archive-table .status-chip.status-inProgress,.theme-night .archive-table .status-chip.status-completed { color:var(--night-text); background:var(--night-control); border-color:#0b0b08; border-left-color:var(--night-text); }
+/* Status chips reuse the archive dossier block, with the board's yellow, blue, and green state signals. */
+.archive-table .status-chip { --status-rail:#858780; position:relative; padding-left:18px; color:var(--ink); background:var(--paper); border-left:10px solid var(--status-rail); }
+.archive-table .status-chip::before { content:''; position:absolute; left:3px; top:4px; bottom:4px; width:3px; background:rgba(255,255,255,.85); border:0; transform:skew(-8deg); }
+.archive-table .status-chip.status-inProgress { --status-rail:var(--blue); color:#12283d; background:#cfe6fb; }.archive-table .status-chip.status-pending { --status-rail:#c6a415; color:#3d3308; background:#fff0a1; }.archive-table .status-chip.status-completed { --status-rail:var(--green); color:#143522; background:#d4efdd; }
+.theme-night .archive-table .status-chip { color:var(--night-text); background:var(--night-control); border-color:#0b0b08; border-left-color:var(--status-rail); }.theme-night .archive-table .status-chip.status-inProgress { --status-rail:#66a9e4; background:#25455f; }.theme-night .archive-table .status-chip.status-pending { --status-rail:#e3c642; background:#51481d; }.theme-night .archive-table .status-chip.status-completed { --status-rail:#67b581; background:#294a35; }
 
 /* Persona-style operating scrollbars: deliberately square, ink-framed and signal-yellow. */
 html,body,.game-menu,.task-modal,.rich-description-editor,.archive-filter-menu,.archive-date-menu,.recurrence-series-list,.schedule-list .timeline { scrollbar-color:var(--yellow) var(--ink); scrollbar-width:auto; }
