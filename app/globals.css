@@ -811,7 +811,6 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 .board.is-compact .task-card.priority-must { border-width:3px; box-shadow:4px 4px 0 var(--red),7px 7px 0 var(--ink); }
 .board.is-compact .task-card.priority-must:active { box-shadow:1px 1px 0 var(--red),3px 3px 0 var(--ink); }
 .board.is-compact .task-card.priority-must::before { z-index:5; right:-20px; top:6px; width:72px; padding:2px 0; font-size:7px; }
-.board.is-compact .task-card.status-inProgress.priority-must::before { animation:none; transform:rotate(39deg); }
 .board.is-compact .task-card.priority-must .priority-label { position:absolute; z-index:4; right:42px; top:8px; padding:2px 4px; visibility:visible; font-size:7px; animation:mustPulse 1.25s ease-in-out infinite; }
 .board.is-compact .task-card.priority-must .card-stripe { background:var(--type); }
 .board.is-compact .task-card.priority-high::after { width:19px; height:19px; font-size:10px; }
