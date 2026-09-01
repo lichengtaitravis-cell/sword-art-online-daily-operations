@@ -8,7 +8,7 @@ export type SleepRecord = {
   updatedAt: string;
 };
 
-async function request<T>(url = SLEEP_RECORDS_URL, init?: RequestInit) {
+async function request<T extends object>(url = SLEEP_RECORDS_URL, init?: RequestInit) {
   const response = await fetch(url, {
     cache: 'no-store',
     ...init,
