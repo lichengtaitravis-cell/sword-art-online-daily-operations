@@ -3,11 +3,12 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { BrandLockup } from './components/BrandLockup';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
+import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
 
 type Status = 'pending' | 'inProgress' | 'completed';
 type Priority = 'must' | 'high' | 'medium' | 'low';
 type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly';
-type View = 'board' | 'table' | 'calendar' | 'settings';
+type View = 'board' | 'table' | 'calendar' | 'sleep' | 'settings';
 type ChoiceFieldName = 'status' | 'priority' | 'taskType' | 'location' | 'recurrence';
 type DateFieldName = 'startedAt' | 'completedAt' | 'dueAt';
 type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
@@ -67,12 +68,13 @@ type PlannerSettings = {
 
 const BASE_TYPES: PlannerSettings['taskTypes'] = [
   ...['🧬 个人', '📚 学业', '🎯 复习', '✍️ 考试', '💼 工作', '📕 阅读', '🎓 证书', '🧠 复盘'].map((value) => ({ value, color: 'purple' as const })),
-  ...['⏰ 作息', '✉️ 邮件', '📅 会议', '🚪 出行'].map((value) => ({ value, color: 'blue' as const })),
+  ...['✉️ 邮件', '📅 会议', '🚪 出行'].map((value) => ({ value, color: 'blue' as const })),
   ...['🍽️ 饮食', '🛒 购物', '📋 杂事', '🧹 家务', '🫧 卫生'].map((value) => ({ value, color: 'green' as const })),
   ...['🏃‍➡️ 运动', '🧘 冥想', '🎈 聚会', '🎮 娱乐', '🛏️ 休息'].map((value) => ({ value, color: 'yellow' as const })),
 ];
 const BASE_LOCATIONS = ['🏠 家', '🏢 公司', '🏫 学校', '💻 线上', '🏃 户外', '✈️ 机场', '🚉 车站', '🛒 超市', '📍 其他'].map((value) => ({ value }));
 const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家', recurrenceEnabled: true, recurrenceOrder: [] };
+const RETIRED_ROUTINE_TYPE = '⏰ 作息';
 const TASK_KEY = 'sao-planner-tasks-v2';
 const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
 const SETTINGS_KEY = 'sao-planner-settings-v1';
@@ -101,11 +103,12 @@ function sortedTaskTypes(taskTypes: PlannerSettings['taskTypes']) {
 
 function normalizeSettings(raw: Partial<PlannerSettings> | null | undefined): PlannerSettings {
   const merged = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
+  const taskTypes = sortedTaskTypes((Array.isArray(merged.taskTypes) ? merged.taskTypes : BASE_TYPES).filter((type) => type.value !== RETIRED_ROUTINE_TYPE));
   return {
     username: typeof merged.username === 'string' && merged.username.trim() ? merged.username.trim() : DEFAULT_SETTINGS.username,
-    taskTypes: sortedTaskTypes(Array.isArray(merged.taskTypes) ? merged.taskTypes : BASE_TYPES),
+    taskTypes,
     locations: Array.isArray(merged.locations) ? merged.locations : BASE_LOCATIONS,
-    defaultTaskType: typeof merged.defaultTaskType === 'string' ? merged.defaultTaskType : DEFAULT_SETTINGS.defaultTaskType,
+    defaultTaskType: typeof merged.defaultTaskType === 'string' && merged.defaultTaskType !== RETIRED_ROUTINE_TYPE && taskTypes.some((type) => type.value === merged.defaultTaskType) ? merged.defaultTaskType : DEFAULT_SETTINGS.defaultTaskType,
     defaultLocation: typeof merged.defaultLocation === 'string' ? merged.defaultLocation : DEFAULT_SETTINGS.defaultLocation,
     recurrenceEnabled: merged.recurrenceEnabled !== false,
     recurrenceOrder: Array.isArray(merged.recurrenceOrder) ? [...new Set(merged.recurrenceOrder.filter((seriesId): seriesId is string => typeof seriesId === 'string' && seriesId.length > 0))] : [],
@@ -122,7 +125,8 @@ const navItems: { id: View; no: string; title: string; subtitle: string; mark: s
   { id: 'board', no: '01', title: 'DAILY OPS', subtitle: '每日作战计划', mark: '▶' },
   { id: 'table', no: '02', title: 'MISSION ARCHIVE', subtitle: '任务档案表', mark: '▦' },
   { id: 'calendar', no: '03', title: 'CALENDAR', subtitle: '月度行动日历', mark: '◆' },
-  { id: 'settings', no: '04', title: 'DESIGN', subtitle: '默认设置', mark: '✦' },
+  { id: 'sleep', no: '04', title: 'NIGHT LOG', subtitle: '夜间状态档案', mark: '☾' },
+  { id: 'settings', no: '05', title: 'DESIGN', subtitle: '默认设置', mark: '✦' },
 ];
 
 function localDateKey(date: Date) {
@@ -332,6 +336,25 @@ function formatTime(value: string, includeDate = true) {
   return new Intl.DateTimeFormat('zh-CN', includeDate
     ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }
     : { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+}
+
+function localDateTimeInputValue(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function formatSleepDateTime(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+}
+
+function formatSleepDuration(startedAt: string, wakeAt: string) {
+  const minutes = Math.round((new Date(wakeAt).getTime() - new Date(startedAt).getTime()) / 60_000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return '—';
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours} 小时 ${remainingMinutes} 分`;
 }
 
 function statusLabel(status: Status) {
@@ -980,6 +1003,11 @@ export default function Home() {
   const [customType, setCustomType] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
+  const [sleepRecords, setSleepRecords] = useState<SleepRecord[]>([]);
+  const [sleepLoading, setSleepLoading] = useState(true);
+  const [sleepSubmitting, setSleepSubmitting] = useState(false);
+  const [sleepStartedAt, setSleepStartedAt] = useState(() => localDateTimeInputValue(new Date(Date.now() - 8 * 60 * 60_000).toISOString()));
+  const [wakeAt, setWakeAt] = useState(() => localDateTimeInputValue(new Date().toISOString()));
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
   const [repeaterDraggingId, setRepeaterDraggingId] = useState('');
   const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
@@ -1121,6 +1149,18 @@ export default function Home() {
     void hydrateFromDatabase();
     return () => { cancelled = true; };
   }, [loadAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadSleepRecords().then((records) => {
+      if (!cancelled) setSleepRecords(records);
+    }).catch((error) => {
+      if (!cancelled) setToast(error instanceof Error ? error.message : '无法读取睡眠档案');
+    }).finally(() => {
+      if (!cancelled) setSleepLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1408,6 +1448,33 @@ export default function Home() {
     setMenuClosing(true);
     window.setTimeout(() => setMenuClosing(false), 560);
   };
+  const submitSleepRecord = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const startedAt = new Date(sleepStartedAt);
+    const awakenedAt = new Date(wakeAt);
+    if (Number.isNaN(startedAt.getTime()) || Number.isNaN(awakenedAt.getTime()) || awakenedAt <= startedAt) {
+      setToast('WAKE TIME REQUIRED · 醒来时间必须晚于入睡时间');
+      return;
+    }
+    setSleepSubmitting(true);
+    try {
+      const records = await createSleepRecord({ id: crypto.randomUUID(), sleepStartedAt: startedAt.toISOString(), wakeAt: awakenedAt.toISOString() });
+      setSleepRecords(records);
+      setToast('NIGHT LOG SAVED · 夜间状态已归档');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '睡眠档案保存失败');
+    } finally {
+      setSleepSubmitting(false);
+    }
+  };
+  const deleteSleepRecord = async (id: string) => {
+    try {
+      setSleepRecords(await removeSleepRecord(id));
+      setToast('RECORD REMOVED · 睡眠记录已移除');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '睡眠档案删除失败');
+    }
+  };
   const navigateTo = (nextView: View) => {
     setDayAgendaOpen(false);
     setDraft(null);
@@ -1471,7 +1538,7 @@ export default function Home() {
       <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} username={settings.username} />
       <div className="day-card" aria-label="今日日期"><span>{new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now).toUpperCase()}</span><strong>{String(now.getDate()).padStart(2, '0')}</strong><em>{new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(now).toUpperCase()}</em></div>
       <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {todayActionTasks.length}</small></strong><div className="summary-track"><i style={{ width: `${todayActionTasks.length ? Math.min(100, completedToday / todayActionTasks.length * 100) : 0}%` }} /></div></div>
-      {view !== 'settings' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
+      {view !== 'settings' && view !== 'sleep' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
 
     {view === 'board' && <div className="board-control-rack">
@@ -1524,10 +1591,30 @@ export default function Home() {
       </div>
     </section>}
 
+    {view === 'sleep' && <section className="sleep-page">
+      <header className="page-banner sleep-banner"><span>04</span><div><p>MIDNIGHT CHANNEL · PERSONAL REST LOG</p><h2>NIGHT STATUS ARCHIVE</h2><small>夜间状态档案</small></div><strong>{sleepRecords.length} RECORDS</strong></header>
+      <div className="sleep-console">
+        <section className="sleep-entry-panel">
+          <header><span>INPUT 01</span><div><h3>LOG LAST NIGHT</h3><p>客观记录入睡与醒来时间，系统自动计算睡眠时长。</p></div></header>
+          <form onSubmit={submitSleepRecord}>
+            <label><span>◐ SLEEP START / 入睡时间</span><input type="datetime-local" required value={sleepStartedAt} onChange={(event) => setSleepStartedAt(event.target.value)} /></label>
+            <label><span>◉ WAKE SIGNAL / 醒来时间</span><input type="datetime-local" required value={wakeAt} onChange={(event) => setWakeAt(event.target.value)} /></label>
+            <div className="sleep-duration-preview"><span>DURATION / 睡眠时长</span><strong>{formatSleepDuration(sleepStartedAt, wakeAt)}</strong><small>AUTO-CALCULATED</small></div>
+            <button type="submit" disabled={sleepSubmitting}>{sleepSubmitting ? 'SAVING SIGNAL…' : '◈ ARCHIVE NIGHT STATUS'}</button>
+          </form>
+        </section>
+        <aside className="sleep-protocol-card" aria-label="记录说明"><span>STATUS PROTOCOL</span><strong>REST IS<br />NOT A MISSION.</strong><p>睡眠只需要如实归档；它不进入任务状态、拖拽或 Daily Flow。</p><i aria-hidden="true">☾</i></aside>
+      </div>
+      <section className="sleep-history" aria-label="睡眠记录历史">
+        <header><div><span>ARCHIVE LOG</span><h3>RECENT NIGHT RECORDS</h3></div><strong>{sleepLoading ? 'LINKING…' : `${sleepRecords.length} ENTRIES`}</strong></header>
+        {sleepLoading ? <div className="sleep-empty">LINKING LOCAL SLEEP ARCHIVE…</div> : sleepRecords.length ? <div className="sleep-record-list">{sleepRecords.map((record, index) => <article key={record.id} className="sleep-record"><span className="sleep-record-index">{String(index + 1).padStart(2, '0')}</span><div className="sleep-record-window"><small>SLEEP</small><time>{formatSleepDateTime(record.sleepStartedAt)}</time><i>→</i><small>WAKE</small><time>{formatSleepDateTime(record.wakeAt)}</time></div><strong>{formatSleepDuration(record.sleepStartedAt, record.wakeAt)}</strong><button type="button" onClick={() => void deleteSleepRecord(record.id)} aria-label={`删除 ${formatSleepDateTime(record.wakeAt)} 的睡眠记录`}>×<span>REMOVE</span></button></article>)}</div> : <div className="sleep-empty"><i>☾</i><strong>NO NIGHT STATUS ON FILE</strong><span>完成第一条记录后，它会保存在本地睡眠档案中。</span></div>}
+      </section>
+    </section>}
+
     {view === 'settings' && <section className="settings-page">
-      <header className="page-banner"><span>04</span><div><p>PERSONAL OPERATION RULES</p><h2>DESIGN</h2></div><strong>AUTO-SAVED</strong></header>
+      <header className="page-banner"><span>05</span><div><p>PERSONAL OPERATION RULES</p><h2>DESIGN</h2></div><strong>AUTO-SAVED</strong></header>
       <div className="settings-grid"><section className="settings-panel profile-panel"><header><span>00</span><div><h3>PLAYER IDENTITY</h3><p>同步更新标题上方与主菜单中的用户名</p></div></header><div className="profile-console"><div className="profile-badge"><span>ACTIVE PLAYER</span><strong>{settings.username}</strong><small>SWORD ART ONLINE · LOCAL PROFILE</small></div><label><span>USERNAME / 用户名</span><input maxLength={32} value={settings.username} onChange={(event) => setSettings({ ...settings, username: event.target.value })} onBlur={() => setSettings((current) => ({ ...current, username: current.username.trim() || DEFAULT_SETTINGS.username }))} placeholder="输入用户名" /><small>最多 32 个字符，修改后自动保存到本地 SQLite。</small></label></div></section><section className="settings-panel loadout-studio"><header><span>01</span><div><h3>NEW MISSION DEFAULTS</h3><p>只决定新建任务时自动填入的内容</p></div></header><div className="loadout-console"><div className={`loadout-preview type-${typeColor(settings.defaultTaskType, settings)}`}><span>PREVIEW</span><strong>下一项新任务</strong><p>{settings.defaultTaskType}</p><small>{settings.defaultLocation} · 中优先级</small></div><div className="loadout-controls"><label><span>TASK TYPE / 默认类型</span><select value={settings.defaultTaskType} onChange={(event) => setSettings({ ...settings, defaultTaskType: event.target.value })}>{sortedTaskTypes(settings.taskTypes).map((type) => <option key={type.value}>{type.value}</option>)}</select></label><label><span>LOCATION / 默认地点</span><select value={settings.defaultLocation} onChange={(event) => setSettings({ ...settings, defaultLocation: event.target.value })}>{settings.locations.map((location) => <option key={location.value}>{location.value}</option>)}</select></label><p>优先级不设默认偏好，新任务统一从“中”开始，随后可在任务详情里调整。</p></div></div></section>
-        <section className="settings-panel custom-panel"><header><span>02</span><div><h3>OPTION WORKSHOP</h3><p>扩充你的任务词库</p></div></header><div className="workshop-body"><form onSubmit={(event) => { event.preventDefault(); if (!customType.trim()) return; setSettings({ ...settings, taskTypes: sortedTaskTypes([...settings.taskTypes, { value: customType.trim(), color: customTypeColor, custom: true }]) }); setCustomType(''); }}><label><span>新增任务类型</span><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="例如：🎵 音乐" /></label><div className="color-choices">{(['purple', 'blue', 'green', 'yellow'] as TypeColor[]).map((color) => <button type="button" aria-label={color} className={`${color} ${customTypeColor === color ? 'active' : ''}`} key={color} onClick={() => setCustomTypeColor(color)} />)}</div><button className="settings-add">＋ 添加类型</button></form><form onSubmit={(event) => { event.preventDefault(); if (!customLocation.trim()) return; setSettings({ ...settings, locations: [...settings.locations, { value: customLocation.trim(), custom: true }] }); setCustomLocation(''); }}><label><span>新增地点</span><input value={customLocation} onChange={(e) => setCustomLocation(e.target.value)} placeholder="例如：☕ 咖啡店" /></label><button className="settings-add">＋ 添加地点</button></form></div><div className="custom-list">{sortedTaskTypes(settings.taskTypes).filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, taskTypes: settings.taskTypes.filter((type) => type.value !== item.value), defaultTaskType: settings.defaultTaskType === item.value ? '🧬 个人' : settings.defaultTaskType })}>{item.value}<span>×</span></button>)}{settings.locations.filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, locations: settings.locations.filter((location) => location.value !== item.value), defaultLocation: settings.defaultLocation === item.value ? '🏠 家' : settings.defaultLocation })}>{item.value}<span>×</span></button>)}</div></section>
+        <section className="settings-panel custom-panel"><header><span>02</span><div><h3>OPTION WORKSHOP</h3><p>扩充你的任务词库</p></div></header><div className="workshop-body"><form onSubmit={(event) => { event.preventDefault(); if (!customType.trim() || customType.trim() === RETIRED_ROUTINE_TYPE) return; setSettings({ ...settings, taskTypes: sortedTaskTypes([...settings.taskTypes, { value: customType.trim(), color: customTypeColor, custom: true }]) }); setCustomType(''); }}><label><span>新增任务类型</span><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="例如：🎵 音乐" /></label><div className="color-choices">{(['purple', 'blue', 'green', 'yellow'] as TypeColor[]).map((color) => <button type="button" aria-label={color} className={`${color} ${customTypeColor === color ? 'active' : ''}`} key={color} onClick={() => setCustomTypeColor(color)} />)}</div><button className="settings-add">＋ 添加类型</button></form><form onSubmit={(event) => { event.preventDefault(); if (!customLocation.trim()) return; setSettings({ ...settings, locations: [...settings.locations, { value: customLocation.trim(), custom: true }] }); setCustomLocation(''); }}><label><span>新增地点</span><input value={customLocation} onChange={(e) => setCustomLocation(e.target.value)} placeholder="例如：☕ 咖啡店" /></label><button className="settings-add">＋ 添加地点</button></form></div><div className="custom-list">{sortedTaskTypes(settings.taskTypes).filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, taskTypes: settings.taskTypes.filter((type) => type.value !== item.value), defaultTaskType: settings.defaultTaskType === item.value ? '🧬 个人' : settings.defaultTaskType })}>{item.value}<span>×</span></button>)}{settings.locations.filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, locations: settings.locations.filter((location) => location.value !== item.value), defaultLocation: settings.defaultLocation === item.value ? '🏠 家' : settings.defaultLocation })}>{item.value}<span>×</span></button>)}</div></section>
         <section className="settings-panel recurrence-control-panel">
           <header><span>03</span><div><h3>REPEAT CONTROL</h3><p>循环任务的总控与活动队列</p></div><strong>{activeRecurringTasks.length} ACTIVE</strong></header>
           <div className="repeat-control-grid">

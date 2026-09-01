@@ -53,12 +53,24 @@ db.exec(`
     imported_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS sleep_records (
+    id TEXT PRIMARY KEY,
+    sleep_started_at TEXT NOT NULL,
+    wake_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (wake_at > sleep_started_at)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tasks_status_manual_order
   ON tasks(status, manual_order);
 
   CREATE INDEX IF NOT EXISTS idx_tasks_due_at
   ON tasks(due_at)
   WHERE due_at != '';
+
+  CREATE INDEX IF NOT EXISTS idx_sleep_records_wake_at
+  ON sleep_records(wake_at DESC);
 `);
 db.exec('PRAGMA optimize');
 
@@ -84,6 +96,12 @@ const writeSettings = db.prepare(`
 const writeBackup = db.prepare(`
   INSERT INTO migration_backups (source, payload_json, imported_at) VALUES (?, ?, ?)
 `);
+const readSleepRecords = db.prepare('SELECT id, sleep_started_at, wake_at, created_at, updated_at FROM sleep_records ORDER BY wake_at DESC');
+const insertSleepRecord = db.prepare(`
+  INSERT INTO sleep_records (id, sleep_started_at, wake_at, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?)
+`);
+const deleteSleepRecord = db.prepare('DELETE FROM sleep_records WHERE id = ?');
 
 function getMeta(key, fallback) {
   return readMeta.get(key)?.value ?? fallback;
@@ -173,6 +191,31 @@ function saveState(payload) {
   return { conflict: false, state: getState() };
 }
 
+function getSleepRecords() {
+  return readSleepRecords.all().map((record) => ({
+    id: record.id,
+    sleepStartedAt: record.sleep_started_at,
+    wakeAt: record.wake_at,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  }));
+}
+
+function createSleepRecord(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('Sleep record payload must be an object');
+  const id = typeof payload.id === 'string' && payload.id ? payload.id : crypto.randomUUID();
+  const sleepStartedAt = typeof payload.sleepStartedAt === 'string' ? payload.sleepStartedAt : '';
+  const wakeAt = typeof payload.wakeAt === 'string' ? payload.wakeAt : '';
+  const start = new Date(sleepStartedAt);
+  const wake = new Date(wakeAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(wake.getTime()) || wake <= start) {
+    throw new Error('Wake time must be later than sleep time');
+  }
+  const now = new Date().toISOString();
+  insertSleepRecord.run(id, start.toISOString(), wake.toISOString(), now, now);
+  return getSleepRecords();
+}
+
 function isAllowedOrigin(origin) {
   if (!origin) return true;
   try {
@@ -187,7 +230,7 @@ function sendJson(response, status, value, origin = '') {
   response.writeHead(status, {
     'Access-Control-Allow-Origin': isAllowedOrigin(origin) ? origin || '*' : 'null',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, PUT, OPTIONS',
     'Cache-Control': 'no-store',
     'Content-Type': 'application/json; charset=utf-8',
   });
@@ -214,6 +257,18 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/state') {
       return sendJson(response, 200, getState(), origin);
+    }
+    if (request.method === 'GET' && request.url === '/v1/sleep-records') {
+      return sendJson(response, 200, getSleepRecords(), origin);
+    }
+    if (request.method === 'POST' && request.url === '/v1/sleep-records') {
+      return sendJson(response, 201, createSleepRecord(await readJson(request)), origin);
+    }
+    if (request.method === 'DELETE' && request.url?.startsWith('/v1/sleep-records/')) {
+      const id = decodeURIComponent(request.url.slice('/v1/sleep-records/'.length));
+      if (!id) return sendJson(response, 400, { error: 'Sleep record id is required' }, origin);
+      deleteSleepRecord.run(id);
+      return sendJson(response, 200, getSleepRecords(), origin);
     }
     if (request.method === 'PUT' && request.url === '/v1/state') {
       const result = saveState(await readJson(request));
