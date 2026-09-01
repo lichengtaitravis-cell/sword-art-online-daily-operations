@@ -349,12 +349,25 @@ function formatSleepDateTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
 }
 
+function formatSleepArchiveDate(value: string) {
+  const date = new Date(value);
+  return {
+    month: new Intl.DateTimeFormat('en-US', { month: 'short' }).format(date).toUpperCase(),
+    day: new Intl.DateTimeFormat('en-US', { day: '2-digit' }).format(date),
+    weekday: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase(),
+  };
+}
+
 function formatSleepDuration(startedAt: string, wakeAt: string) {
   const minutes = Math.round((new Date(wakeAt).getTime() - new Date(startedAt).getTime()) / 60_000);
+  return formatSleepMinutes(minutes);
+}
+
+function formatSleepMinutes(minutes: number) {
   if (!Number.isFinite(minutes) || minutes <= 0) return '—';
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  return `${hours} 小时 ${remainingMinutes} 分`;
+  return `${hours}H ${String(remainingMinutes).padStart(2, '0')}M`;
 }
 
 function statusLabel(status: Status) {
@@ -935,11 +948,11 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     {task.status === 'inProgress' && <span className="mission-state-signal" aria-hidden="true">LIVE</span>}
     {task.status === 'completed' && <span className="mission-state-signal" aria-hidden="true">CLEAR</span>}
     {countdown && <div className={`card-countdown countdown-${countdown.kind} urgency-${countdown.urgency}`} aria-label={`${countdownSignalLabel(countdown)} ${countdownText(countdown.targetAt, now)}`}><div><span>{countdown.kind === 'start' ? '▶ START' : '⊘ DEADLINE'}</span><small>{countdown.kind === 'start' ? '行动窗口' : '禁忌时限'}</small></div><strong>{countdownText(countdown.targetAt, now)}</strong>{countdown.kind === 'start' ? <button type="button" aria-label={`开始任务：${task.title}`} onClick={(event) => { event.stopPropagation(); onStart(); }}>▶</button> : <i className="deadline-seal" aria-hidden="true" />}</div>}
-    <div className="card-meta"><span>{task.location}</span>
+    <div className="card-meta"><span>{task.taskType}</span>
       {task.status === 'pending' && <span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span>}
       {task.status === 'inProgress' && <span>▶ {formatTime(task.startedAt)}</span>}
       {task.status === 'completed' && <span>✓ {formatTime(task.completedAt)}</span>}
-    </div><div className="compact-card-meta"><span>{task.location}</span><span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span></div><span className="drag-hint" aria-hidden="true">⋮⋮</span>
+    </div><div className="compact-card-meta"><span>{task.taskType}</span><span className={task.dueAt && +new Date(task.dueAt) < +now ? 'is-overdue' : ''}>⌁ {task.dueAt ? formatTime(task.dueAt) : 'NO DEADLINE'}</span></div><span className="drag-hint" aria-hidden="true">⋮⋮</span>
   </article>;
 }
 
@@ -1006,8 +1019,13 @@ export default function Home() {
   const [sleepRecords, setSleepRecords] = useState<SleepRecord[]>([]);
   const [sleepLoading, setSleepLoading] = useState(true);
   const [sleepSubmitting, setSleepSubmitting] = useState(false);
+  const [sleepHistoryExpanded, setSleepHistoryExpanded] = useState(false);
   const [sleepStartedAt, setSleepStartedAt] = useState(() => localDateTimeInputValue(new Date(Date.now() - 8 * 60 * 60_000).toISOString()));
   const [wakeAt, setWakeAt] = useState(() => localDateTimeInputValue(new Date().toISOString()));
+  const [sleepPickerField, setSleepPickerField] = useState<'sleepStartedAt' | 'wakeAt' | null>(null);
+  const [sleepPickerDate, setSleepPickerDate] = useState(localDateKey(new Date()));
+  const [sleepPickerTime, setSleepPickerTime] = useState('00:00');
+  const [sleepPickerMonth, setSleepPickerMonth] = useState(() => { const date = new Date(); date.setDate(1); return date; });
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
   const [repeaterDraggingId, setRepeaterDraggingId] = useState('');
   const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
@@ -1153,7 +1171,14 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     void loadSleepRecords().then((records) => {
-      if (!cancelled) setSleepRecords(records);
+      if (!cancelled) {
+        setSleepRecords(records);
+        const todayRecord = records.find((record) => localDateKey(new Date(record.wakeAt)) === localDateKey(new Date()));
+        if (todayRecord) {
+          setSleepStartedAt(localDateTimeInputValue(todayRecord.sleepStartedAt));
+          setWakeAt(localDateTimeInputValue(todayRecord.wakeAt));
+        }
+      }
     }).catch((error) => {
       if (!cancelled) setToast(error instanceof Error ? error.message : '无法读取睡眠档案');
     }).finally(() => {
@@ -1303,6 +1328,13 @@ export default function Home() {
     return Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; });
   }, [pickerMonth]);
 
+  const sleepPickerCalendarDays = useMemo(() => {
+    const first = new Date(sleepPickerMonth.getFullYear(), sleepPickerMonth.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - first.getDay());
+    return Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; });
+  }, [sleepPickerMonth]);
+
   const choiceOptions = useMemo(() => {
     if (!choiceField) return [] as { value: string; label: string; color?: TypeColor }[];
     if (choiceField === 'status') return [{ value: 'pending', label: 'PENDING · 等待行动' }, { value: 'inProgress', label: 'IN PROGRESS · 正在攻略' }, { value: 'completed', label: 'COMPLETED · 今日战果' }];
@@ -1442,6 +1474,7 @@ export default function Home() {
 
   const choiceValue = draft && choiceField ? (choiceField === 'status' ? draft.status : choiceField === 'priority' ? draft.priority : choiceField === 'taskType' ? draft.taskType : choiceField === 'location' ? draft.location : draft.recurrence) : '';
   const [pickerHour = 0, pickerMinute = 0] = pickerTime ? pickerTime.split(':').map(Number) : [0, 0];
+  const [sleepPickerHour = 0, sleepPickerMinute = 0] = sleepPickerTime ? sleepPickerTime.split(':').map(Number) : [0, 0];
   const closeMenu = () => {
     if (!menuOpen) return;
     setMenuOpen(false);
@@ -1475,6 +1508,22 @@ export default function Home() {
       setToast(error instanceof Error ? error.message : '睡眠档案删除失败');
     }
   };
+  const openSleepPicker = (field: 'sleepStartedAt' | 'wakeAt') => {
+    const value = field === 'sleepStartedAt' ? sleepStartedAt : wakeAt;
+    const [date = localDateKey(new Date()), time = '00:00'] = value.split('T');
+    const selectedDate = new Date(`${date}T${time}`);
+    setSleepPickerDate(date);
+    setSleepPickerTime(time);
+    setSleepPickerMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+    setSleepPickerField(field);
+  };
+  const applySleepPicker = () => {
+    if (!sleepPickerField || !sleepPickerDate || !sleepPickerTime) return;
+    const value = `${sleepPickerDate}T${sleepPickerTime}`;
+    if (sleepPickerField === 'sleepStartedAt') setSleepStartedAt(value);
+    else setWakeAt(value);
+    setSleepPickerField(null);
+  };
   const navigateTo = (nextView: View) => {
     setDayAgendaOpen(false);
     setDraft(null);
@@ -1504,6 +1553,21 @@ export default function Home() {
   const activeNav = navItems.find((item) => item.id === view)!;
   const activeCountdowns = missionTasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
   const visibleCountdowns = activeCountdowns.slice(0, 2);
+  const sleepSummary = useMemo(() => {
+    const latest = sleepRecords[0] ?? null;
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const currentMonth = sleepRecords.filter((record) => new Date(record.wakeAt).getTime() >= monthStart);
+    const averageFor = (records: SleepRecord[]) => records.length
+      ? Math.round(records.reduce((total, record) => total + (new Date(record.wakeAt).getTime() - new Date(record.sleepStartedAt).getTime()) / 60_000, 0) / records.length)
+      : 0;
+    return {
+      latest,
+      currentMonthCount: currentMonth.length,
+      currentMonthAverageMinutes: averageFor(currentMonth),
+      currentMonthLabel: `${now.getMonth() + 1}月平均`,
+      overallAverageMinutes: averageFor(sleepRecords),
+    };
+  }, [sleepRecords, now]);
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
   if (!viewRestored) return <main className="app-shell boot-screen boot-prime" aria-label="正在准备界面" />;
@@ -1592,22 +1656,29 @@ export default function Home() {
     </section>}
 
     {view === 'sleep' && <section className="sleep-page">
-      <header className="page-banner sleep-banner"><span>04</span><div><p>MIDNIGHT CHANNEL · PERSONAL REST LOG</p><h2>NIGHT STATUS ARCHIVE</h2><small>夜间状态档案</small></div><strong>{sleepRecords.length} RECORDS</strong></header>
+      <header className="page-banner sleep-banner"><span>04</span><div><p>MIDNIGHT CHANNEL · PERSONAL REST LOG</p><h2>NIGHT STATUS ARCHIVE</h2></div><strong>{sleepRecords.length} RECORDS</strong></header>
       <div className="sleep-console">
         <section className="sleep-entry-panel">
-          <header><span>INPUT 01</span><div><h3>LOG LAST NIGHT</h3><p>客观记录入睡与醒来时间，系统自动计算睡眠时长。</p></div></header>
+          <header><span>INPUT 01</span><div><h3>LOG LAST NIGHT</h3></div></header>
           <form onSubmit={submitSleepRecord}>
-            <label><span>◐ SLEEP START / 入睡时间</span><input type="datetime-local" required value={sleepStartedAt} onChange={(event) => setSleepStartedAt(event.target.value)} /></label>
-            <label><span>◉ WAKE SIGNAL / 醒来时间</span><input type="datetime-local" required value={wakeAt} onChange={(event) => setWakeAt(event.target.value)} /></label>
-            <div className="sleep-duration-preview"><span>DURATION / 睡眠时长</span><strong>{formatSleepDuration(sleepStartedAt, wakeAt)}</strong><small>AUTO-CALCULATED</small></div>
+            <button type="button" className="sleep-datetime-trigger sleep-start-trigger" onClick={() => openSleepPicker('sleepStartedAt')}><span>◐ SLEEP START / 入睡时间</span><strong><i>{sleepStartedAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{sleepStartedAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
+            <button type="button" className="sleep-datetime-trigger wake-trigger" onClick={() => openSleepPicker('wakeAt')}><span>◉ WAKE SIGNAL / 醒来时间</span><strong><i>{wakeAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{wakeAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
             <button type="submit" disabled={sleepSubmitting}>{sleepSubmitting ? 'SAVING SIGNAL…' : '◈ ARCHIVE NIGHT STATUS'}</button>
           </form>
         </section>
-        <aside className="sleep-protocol-card" aria-label="记录说明"><span>STATUS PROTOCOL</span><strong>REST IS<br />NOT A MISSION.</strong><p>睡眠只需要如实归档；它不进入任务状态、拖拽或 Daily Flow。</p><i aria-hidden="true">☾</i></aside>
+        <section className="sleep-status-panel" aria-label="睡眠状态汇总">
+          <header><span>STATUS 02</span><div><h3>REST SIGNAL</h3></div><i aria-hidden="true">☾</i></header>
+          <div className="sleep-stat-grid">
+            <article className="sleep-stat-primary"><span>LATEST LOG / 最新归档</span><strong>{sleepSummary.latest ? formatSleepDuration(sleepSummary.latest.sleepStartedAt, sleepSummary.latest.wakeAt) : '—'}</strong><small>{sleepSummary.latest ? `${formatSleepDateTime(sleepSummary.latest.sleepStartedAt)} → ${formatSleepDateTime(sleepSummary.latest.wakeAt)}` : 'NO SIGNAL ON FILE'}</small></article>
+            <article><span>MONTHLY AVERAGE / {sleepSummary.currentMonthLabel}</span><strong>{sleepSummary.currentMonthCount ? formatSleepMinutes(sleepSummary.currentMonthAverageMinutes) : '—'}</strong><small>{sleepSummary.currentMonthCount ? `${sleepSummary.currentMonthCount} NIGHT${sleepSummary.currentMonthCount === 1 ? '' : 'S'} THIS MONTH` : 'AWAITING DATA'}</small></article>
+            <article><span>ALL-TIME AVERAGE</span><strong>{sleepRecords.length ? formatSleepMinutes(sleepSummary.overallAverageMinutes) : '—'}</strong><small>{sleepRecords.length ? 'FULL ARCHIVE SIGNAL' : 'AWAITING DATA'}</small></article>
+          </div>
+          <div className="sleep-signal-strip" aria-label="任务类型颜色标记"><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
+        </section>
       </div>
       <section className="sleep-history" aria-label="睡眠记录历史">
-        <header><div><span>ARCHIVE LOG</span><h3>RECENT NIGHT RECORDS</h3></div><strong>{sleepLoading ? 'LINKING…' : `${sleepRecords.length} ENTRIES`}</strong></header>
-        {sleepLoading ? <div className="sleep-empty">LINKING LOCAL SLEEP ARCHIVE…</div> : sleepRecords.length ? <div className="sleep-record-list">{sleepRecords.map((record, index) => <article key={record.id} className="sleep-record"><span className="sleep-record-index">{String(index + 1).padStart(2, '0')}</span><div className="sleep-record-window"><small>SLEEP</small><time>{formatSleepDateTime(record.sleepStartedAt)}</time><i>→</i><small>WAKE</small><time>{formatSleepDateTime(record.wakeAt)}</time></div><strong>{formatSleepDuration(record.sleepStartedAt, record.wakeAt)}</strong><button type="button" onClick={() => void deleteSleepRecord(record.id)} aria-label={`删除 ${formatSleepDateTime(record.wakeAt)} 的睡眠记录`}>×<span>REMOVE</span></button></article>)}</div> : <div className="sleep-empty"><i>☾</i><strong>NO NIGHT STATUS ON FILE</strong><span>完成第一条记录后，它会保存在本地睡眠档案中。</span></div>}
+        <header><div><span>ARCHIVE LOG</span><h3>RECENT NIGHT RECORDS</h3></div>{sleepRecords.length > 7 && <button type="button" className="sleep-history-toggle" aria-expanded={sleepHistoryExpanded} onClick={() => setSleepHistoryExpanded((current) => !current)}>{sleepHistoryExpanded ? 'COLLAPSE ↑' : `+${sleepRecords.length - 7} PAST LOG${sleepRecords.length - 7 === 1 ? '' : 'S'} ↓`}</button>}</header>
+        {sleepLoading ? <div className="sleep-empty">LINKING LOCAL SLEEP ARCHIVE…</div> : sleepRecords.length ? <div className="sleep-record-list">{sleepRecords.slice(0, sleepHistoryExpanded ? undefined : 7).map((record) => { const archiveDate = formatSleepArchiveDate(record.wakeAt); const isWeekend = [0, 6].includes(new Date(record.wakeAt).getDay()); return <article key={record.id} className={`sleep-record ${isWeekend ? 'is-weekend' : 'is-weekday'}`}><time className="sleep-record-date" dateTime={record.wakeAt}><i aria-hidden="true" /><small>{archiveDate.month}</small><strong>{archiveDate.day}</strong><em>{archiveDate.weekday}</em></time><div className="sleep-record-window"><small>SLEEP</small><time>{formatSleepDateTime(record.sleepStartedAt)}</time><i>→</i><small>WAKE</small><time>{formatSleepDateTime(record.wakeAt)}</time></div><strong>{formatSleepDuration(record.sleepStartedAt, record.wakeAt)}</strong><button type="button" onClick={() => void deleteSleepRecord(record.id)} aria-label={`删除 ${formatSleepDateTime(record.wakeAt)} 的睡眠记录`}>×<span>REMOVE</span></button></article>; })}</div> : <div className="sleep-empty"><i>☾</i><strong>NO NIGHT STATUS ON FILE</strong><span>完成第一条记录后，它会保存在本地睡眠档案中。</span></div>}
       </section>
     </section>}
 
@@ -1668,6 +1739,8 @@ export default function Home() {
         {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；修改开始或截止时间后，仅本次任务会脱离循环，模板保持不变。</p>}
       </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>{draft.isRecurrenceTemplate ? '删除循环模板' : '删除任务'}</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">{draft.isRecurrenceTemplate ? '保存循环模板' : '保存任务'} <span>→</span></button></footer>
     </form></div>}
+
+    {sleepPickerField && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSleepPickerField(null); }}><section className="persona-selector time-selector sleep-time-selector" role="dialog" aria-modal="true" aria-label={sleepPickerField === 'sleepStartedAt' ? '设置入睡时间' : '设置醒来时间'}><header><span>NIGHT LOG TIME</span><strong>{sleepPickerField === 'sleepStartedAt' ? 'SET SLEEP START' : 'SET WAKE SIGNAL'}</strong><button type="button" className="selector-close-button" aria-label="关闭睡眠时间窗口" onClick={() => setSleepPickerField(null)}>×</button></header><div className="time-toolbelt"><button onClick={() => { const current = new Date(); setSleepPickerDate(localDateKey(current)); setSleepPickerTime(`${String(current.getHours()).padStart(2, '0')}:${String(current.getMinutes()).padStart(2, '0')}`); }}><strong>NOW</strong><span>设为现在</span></button></div><div className="custom-datetime"><section className="date-board"><header><button type="button" onClick={() => setSleepPickerMonth(new Date(sleepPickerMonth.getFullYear(), sleepPickerMonth.getMonth() - 1, 1))}>‹</button><strong>{sleepPickerMonth.getFullYear()} / {String(sleepPickerMonth.getMonth() + 1).padStart(2, '0')}</strong><button type="button" onClick={() => setSleepPickerMonth(new Date(sleepPickerMonth.getFullYear(), sleepPickerMonth.getMonth() + 1, 1))}>›</button></header><div className="picker-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div><div className="picker-days">{sleepPickerCalendarDays.map((day) => { const key = localDateKey(day); return <button type="button" key={key} className={`${day.getMonth() !== sleepPickerMonth.getMonth() ? 'outside' : ''} ${sleepPickerDate === key ? 'active' : ''} ${key === localDateKey(new Date()) ? 'today' : ''}`} onClick={() => { setSleepPickerDate(key); setSleepPickerMonth(new Date(day.getFullYear(), day.getMonth(), 1)); }}>{day.getDate()}</button>; })}</div></section><section className="time-board"><span>SELECT TIME / 选择时间</span><label className="manual-time-input"><span>MANUAL INPUT / 手动输入</span><input type="time" step="60" value={sleepPickerTime} onChange={(event) => setSleepPickerTime(event.target.value)} aria-label="手动输入睡眠时间" /></label><strong>{String(sleepPickerHour).padStart(2, '0')}<i>:</i>{String(sleepPickerMinute).padStart(2, '0')}</strong><label>HOUR / 小时</label><div className="hour-grid">{Array.from({ length: 24 }, (_, hour) => <button type="button" key={hour} className={sleepPickerHour === hour ? 'active' : ''} onClick={() => setSleepPickerTime(`${String(hour).padStart(2, '0')}:${String(sleepPickerMinute).padStart(2, '0')}`)}>{String(hour).padStart(2, '0')}</button>)}</div><label>MINUTE / 分钟</label><div className="minute-grid">{[0, 15, 30, 45, 59].map((minute) => <button type="button" key={minute} className={sleepPickerMinute === minute ? 'active' : ''} onClick={() => setSleepPickerTime(`${String(sleepPickerHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)}>{String(minute).padStart(2, '0')}</button>)}</div></section></div><button type="button" className="time-confirm" onClick={applySleepPicker}>CONFIRM · {sleepPickerDate.replaceAll('-', ' / ')} · {sleepPickerTime} <span>→</span></button></section></div>}
 
     {choiceField && draft && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setChoiceField(null); }}><section className="persona-selector" role="dialog" aria-modal="true"><header><span>SELECT OPTION</span><strong>{choiceField === 'taskType' ? '任务类型' : choiceField === 'location' ? '地点' : choiceField === 'priority' ? '优先级' : choiceField === 'recurrence' ? '循环' : '状态'}</strong><button type="button" className="selector-close-button" aria-label="关闭选项窗口" onClick={() => setChoiceField(null)}>×</button></header><div className={`selector-options selector-${choiceField}`}>{choiceOptions.map((option, index) => <button key={option.value} className={`${option.value === choiceValue ? 'active' : ''} ${option.color ? `type-${option.color}` : ''}`} onClick={() => selectChoice(option.value)}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i>{option.value === choiceValue ? '●' : '○'}</i></button>)}</div><footer>CHOOSE YOUR MOVE · 选择后自动返回任务详情</footer></section></div>}
 
