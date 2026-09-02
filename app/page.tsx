@@ -124,8 +124,8 @@ const boardMeta: { id: Status; index: string; title: string; subtitle: string }[
 const navItems: { id: View; no: string; title: string; subtitle: string; mark: string }[] = [
   { id: 'board', no: '01', title: 'DAILY OPS', subtitle: '每日作战计划', mark: '▶' },
   { id: 'table', no: '02', title: 'MISSION ARCHIVE', subtitle: '任务档案表', mark: '▦' },
-  { id: 'calendar', no: '03', title: 'CALENDAR', subtitle: '月度行动日历', mark: '◆' },
-  { id: 'sleep', no: '04', title: 'NIGHT LOG', subtitle: '夜间状态档案', mark: '☾' },
+  { id: 'sleep', no: '03', title: 'NIGHT LOG', subtitle: '夜间状态档案', mark: '☾' },
+  { id: 'calendar', no: '04', title: 'CALENDAR', subtitle: '月度行动日历', mark: '◆' },
   { id: 'settings', no: '05', title: 'DESIGN', subtitle: '默认设置', mark: '✦' },
 ];
 
@@ -368,6 +368,12 @@ function formatSleepMinutes(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return `${hours}H ${String(remainingMinutes).padStart(2, '0')}M`;
+}
+
+function sleepClockPosition(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 0;
+  return ((date.getHours() * 60 + date.getMinutes()) / (24 * 60)) * 100;
 }
 
 function statusLabel(status: Status) {
@@ -1647,7 +1653,7 @@ export default function Home() {
     </section>}
 
     {view === 'calendar' && <section className="calendar-page">
-      <header className="page-banner"><span>03</span><div><p>MONTHLY OPERATION MAP</p><h2>CALENDAR</h2></div><div className="month-nav"><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button><strong>{calendarMonth.getFullYear()} / {String(calendarMonth.getMonth() + 1).padStart(2, '0')}</strong><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>›</button></div></header>
+      <header className="page-banner"><span>04</span><div><p>MONTHLY OPERATION MAP</p><h2>CALENDAR</h2></div><div className="month-nav"><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}>‹</button><strong>{calendarMonth.getFullYear()} / {String(calendarMonth.getMonth() + 1).padStart(2, '0')}</strong><button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}>›</button></div></header>
       <div className="calendar-layout"><div className="month-grid"><div className="weekday-row">{WEEKDAYS.map((day) => <span key={day}>周{day}</span>)}</div><div className="calendar-grid">{calendarDays.map((day) => {
         const key = localDateKey(day); const dayTasks = missionTasks.filter((task) => taskOccursOnCalendarDay(task, key, now));
         return <button key={key} className={`calendar-day ${day.getMonth() !== calendarMonth.getMonth() ? 'outside' : ''} ${key === localDateKey(now) ? 'today' : ''} ${key === selectedDay ? 'selected' : ''}`} onClick={() => { setSelectedDay(key); setDayAgendaOpen(true); }}><span className="day-number">{day.getDate()}</span><div className="day-missions">{dayTasks.slice(0, 3).map((task) => <span key={task.id} className={`calendar-task type-${typeColor(task.taskType, settings)}`}>{task.title}</span>)}{dayTasks.length > 3 && <em>+{dayTasks.length - 3} MORE</em>}</div></button>;
@@ -1656,26 +1662,51 @@ export default function Home() {
     </section>}
 
     {view === 'sleep' && <section className="sleep-page">
-      <header className="page-banner sleep-banner"><span>04</span><div><p>MIDNIGHT CHANNEL · PERSONAL REST LOG</p><h2>NIGHT STATUS ARCHIVE</h2></div><strong>{sleepRecords.length} RECORDS</strong></header>
-      <div className="sleep-console">
-        <section className="sleep-entry-panel">
-          <header><span>INPUT 01</span><div><h3>LOG LAST NIGHT</h3></div></header>
-          <form onSubmit={submitSleepRecord}>
-            <button type="button" className="sleep-datetime-trigger sleep-start-trigger" onClick={() => openSleepPicker('sleepStartedAt')}><span>◐ SLEEP START / 入睡时间</span><strong><i>{sleepStartedAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{sleepStartedAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
-            <button type="button" className="sleep-datetime-trigger wake-trigger" onClick={() => openSleepPicker('wakeAt')}><span>◉ WAKE SIGNAL / 醒来时间</span><strong><i>{wakeAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{wakeAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
-            <button type="submit" disabled={sleepSubmitting}>{sleepSubmitting ? 'SAVING SIGNAL…' : '◈ ARCHIVE NIGHT STATUS'}</button>
-          </form>
-        </section>
-        <section className="sleep-status-panel" aria-label="睡眠状态汇总">
-          <header><span>STATUS 02</span><div><h3>REST SIGNAL</h3></div><i aria-hidden="true">☾</i></header>
-          <div className="sleep-stat-grid">
-            <article className="sleep-stat-primary"><span>LATEST LOG / 最新归档</span><strong>{sleepSummary.latest ? formatSleepDuration(sleepSummary.latest.sleepStartedAt, sleepSummary.latest.wakeAt) : '—'}</strong><small>{sleepSummary.latest ? `${formatSleepDateTime(sleepSummary.latest.sleepStartedAt)} → ${formatSleepDateTime(sleepSummary.latest.wakeAt)}` : 'NO SIGNAL ON FILE'}</small></article>
-            <article><span>MONTHLY AVERAGE / {sleepSummary.currentMonthLabel}</span><strong>{sleepSummary.currentMonthCount ? formatSleepMinutes(sleepSummary.currentMonthAverageMinutes) : '—'}</strong><small>{sleepSummary.currentMonthCount ? `${sleepSummary.currentMonthCount} NIGHT${sleepSummary.currentMonthCount === 1 ? '' : 'S'} THIS MONTH` : 'AWAITING DATA'}</small></article>
-            <article><span>ALL-TIME AVERAGE</span><strong>{sleepRecords.length ? formatSleepMinutes(sleepSummary.overallAverageMinutes) : '—'}</strong><small>{sleepRecords.length ? 'FULL ARCHIVE SIGNAL' : 'AWAITING DATA'}</small></article>
-          </div>
-          <div className="sleep-signal-strip" aria-label="任务类型颜色标记"><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
-        </section>
-      </div>
+      <header className="page-banner sleep-banner"><span>03</span><div><p>MIDNIGHT CHANNEL · PERSONAL REST LOG</p><h2>NIGHT STATUS ARCHIVE</h2></div><strong>{sleepRecords.length} RECORDS</strong></header>
+      <section className="sleep-command-deck" aria-label="睡眠分布与记录控制台">
+        <header className="sleep-command-header"><span>REST DECK 01</span><div><h3>SLEEP DISTRIBUTION</h3><p>24 HOUR SIGNAL MAP · 睡眠时段分布</p></div><strong>{sleepRecords.length ? `LAST ${Math.min(sleepRecords.length, 7)} NIGHTS` : 'AWAITING SIGNAL'}</strong></header>
+        <div className="sleep-command-layout">
+          <section className="sleep-distribution-panel" aria-label="最近七天睡眠时段分布">
+            <header><div><span>DISTRIBUTION MAP</span><h3>WHEN YOU REST</h3></div><small>每一行以醒来日期归档；跨午夜记录在 00:00 两侧连续显示。</small></header>
+            <div className="sleep-distribution-axis" aria-hidden="true"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div>
+            {sleepLoading ? <div className="sleep-distribution-empty">CALIBRATING REST MAP…</div> : sleepRecords.length ? <div className="sleep-distribution-list">{sleepRecords.slice(0, 7).reverse().map((record) => {
+              const started = new Date(record.sleepStartedAt);
+              const awakened = new Date(record.wakeAt);
+              const startedAt = sleepClockPosition(record.sleepStartedAt);
+              const wakeAt = sleepClockPosition(record.wakeAt);
+              const crossesMidnight = localDateKey(started) !== localDateKey(awakened);
+              const archiveDate = formatSleepArchiveDate(record.wakeAt);
+              const duration = formatSleepDuration(record.sleepStartedAt, record.wakeAt);
+              const signalLabel = `${formatSleepDateTime(record.sleepStartedAt)} 至 ${formatSleepDateTime(record.wakeAt)}，共 ${duration}`;
+              return <article key={record.id} className="sleep-distribution-row" aria-label={signalLabel}>
+                <div className="sleep-distribution-date"><time dateTime={record.wakeAt}><span>{archiveDate.month}</span><strong>{archiveDate.day}</strong></time><small>{duration}</small></div>
+                <div className="sleep-distribution-track" aria-hidden="true">
+                  {crossesMidnight ? <><i className="sleep-distribution-block sleep-distribution-before" style={{ left: `${startedAt}%`, width: `${100 - startedAt}%` }} /><i className="sleep-distribution-block sleep-distribution-after" style={{ left: 0, width: `${wakeAt}%` }} /></> : <i className="sleep-distribution-block" style={{ left: `${startedAt}%`, width: `${Math.max(0, wakeAt - startedAt)}%` }} />}
+                  <b className="sleep-distribution-start" style={{ left: `${startedAt}%` }}>{formatTime(record.sleepStartedAt, false)}</b><b className="sleep-distribution-wake" style={{ left: `${wakeAt}%` }}>{formatTime(record.wakeAt, false)}</b>
+                </div>
+              </article>;
+            })}</div> : <div className="sleep-distribution-empty">LOG A NIGHT TO BEGIN YOUR REST MAP.</div>}
+          </section>
+          <aside className="sleep-command-side">
+            <section className="sleep-entry-panel">
+              <header><span>INPUT 02</span><div><h3>LOG LAST NIGHT</h3></div></header>
+              <form onSubmit={submitSleepRecord}>
+                <button type="button" className="sleep-datetime-trigger sleep-start-trigger" onClick={() => openSleepPicker('sleepStartedAt')}><span>◐ SLEEP START / 入睡时间</span><strong><i>{sleepStartedAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{sleepStartedAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
+                <button type="button" className="sleep-datetime-trigger wake-trigger" onClick={() => openSleepPicker('wakeAt')}><span>◉ WAKE SIGNAL / 醒来时间</span><strong><i>{wakeAt.slice(0, 10).replaceAll('-', ' / ')}</i><b>{wakeAt.slice(11)}</b></strong><small>SET DATE &amp; TIME ›</small></button>
+                <button type="submit" disabled={sleepSubmitting}>{sleepSubmitting ? 'SAVING SIGNAL…' : '◈ ARCHIVE NIGHT STATUS'}</button>
+              </form>
+            </section>
+            <section className="sleep-status-panel" aria-label="睡眠状态汇总">
+              <header><span>STATUS 03</span><div><h3>REST SIGNAL</h3></div><i aria-hidden="true">☾</i></header>
+              <div className="sleep-stat-grid">
+                <article className="sleep-stat-primary"><span>LATEST LOG / 最新归档</span><strong>{sleepSummary.latest ? formatSleepDuration(sleepSummary.latest.sleepStartedAt, sleepSummary.latest.wakeAt) : '—'}</strong><small>{sleepSummary.latest ? `${formatSleepDateTime(sleepSummary.latest.sleepStartedAt)} → ${formatSleepDateTime(sleepSummary.latest.wakeAt)}` : 'NO SIGNAL ON FILE'}</small></article>
+                <article><span>MONTHLY AVERAGE / {sleepSummary.currentMonthLabel}</span><strong>{sleepSummary.currentMonthCount ? formatSleepMinutes(sleepSummary.currentMonthAverageMinutes) : '—'}</strong><small>{sleepSummary.currentMonthCount ? `${sleepSummary.currentMonthCount} NIGHT${sleepSummary.currentMonthCount === 1 ? '' : 'S'} THIS MONTH` : 'AWAITING DATA'}</small></article>
+                <article><span>ALL-TIME AVERAGE</span><strong>{sleepRecords.length ? formatSleepMinutes(sleepSummary.overallAverageMinutes) : '—'}</strong><small>{sleepRecords.length ? 'FULL ARCHIVE SIGNAL' : 'AWAITING DATA'}</small></article>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
       <section className="sleep-history" aria-label="睡眠记录历史">
         <header><div><span>ARCHIVE LOG</span><h3>RECENT NIGHT RECORDS</h3></div>{sleepRecords.length > 7 && <button type="button" className="sleep-history-toggle" aria-expanded={sleepHistoryExpanded} onClick={() => setSleepHistoryExpanded((current) => !current)}>{sleepHistoryExpanded ? 'COLLAPSE ↑' : `+${sleepRecords.length - 7} PAST LOG${sleepRecords.length - 7 === 1 ? '' : 'S'} ↓`}</button>}</header>
         {sleepLoading ? <div className="sleep-empty">LINKING LOCAL SLEEP ARCHIVE…</div> : sleepRecords.length ? <div className="sleep-record-list">{sleepRecords.slice(0, sleepHistoryExpanded ? undefined : 7).map((record) => { const archiveDate = formatSleepArchiveDate(record.wakeAt); const isWeekend = [0, 6].includes(new Date(record.wakeAt).getDay()); return <article key={record.id} className={`sleep-record ${isWeekend ? 'is-weekend' : 'is-weekday'}`}><time className="sleep-record-date" dateTime={record.wakeAt}><i aria-hidden="true" /><small>{archiveDate.month}</small><strong>{archiveDate.day}</strong><em>{archiveDate.weekday}</em></time><div className="sleep-record-window"><small>SLEEP</small><time>{formatSleepDateTime(record.sleepStartedAt)}</time><i>→</i><small>WAKE</small><time>{formatSleepDateTime(record.wakeAt)}</time></div><strong>{formatSleepDuration(record.sleepStartedAt, record.wakeAt)}</strong><button type="button" onClick={() => void deleteSleepRecord(record.id)} aria-label={`删除 ${formatSleepDateTime(record.wakeAt)} 的睡眠记录`}>×<span>REMOVE</span></button></article>; })}</div> : <div className="sleep-empty"><i>☾</i><strong>NO NIGHT STATUS ON FILE</strong><span>完成第一条记录后，它会保存在本地睡眠档案中。</span></div>}
