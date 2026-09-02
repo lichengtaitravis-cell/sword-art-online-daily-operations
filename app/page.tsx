@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { BrandLockup } from './components/BrandLockup';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
@@ -680,6 +680,54 @@ function ArchiveFilterMenu({ label, mark, value, options, onChange }: {
   </div>;
 }
 
+function SignalSelect({ value, options, onChange, mark, label }: {
+  value: string; options: ArchiveFilterOption[]; onChange: (value: string) => void; mark: string; label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeOnEscape); };
+  }, [open]);
+
+  return <div className={`signal-select ${open ? 'is-open' : ''}`} ref={rootRef}>
+    <button type="button" className="signal-select-trigger" aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}><i className={mark === '⌖' ? 'signal-select-location-mark' : undefined} aria-hidden="true">{mark}</i><strong>{selected.label}</strong><em aria-hidden="true">⌄</em></button>
+    {open && <div className="signal-select-menu" role="listbox" aria-label={label}>
+      {options.map((option, index) => <button type="button" role="option" aria-selected={option.value === value} className={`signal-select-option ${option.value === value ? 'active' : ''} ${option.tone ? `tone-${option.tone}` : ''}`} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i aria-hidden="true">{option.value === value ? '◆' : '›'}</i></button>)}
+    </div>}
+  </div>;
+}
+
+function WorkshopCombobox({ value, options, onChange, onOptionSelect, placeholder }: {
+  value: string; options: ArchiveFilterOption[]; onChange: (value: string) => void; onOptionSelect?: (value: string) => void; placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const filteredOptions = options.filter((option) => option.label.toLowerCase().includes(value.trim().toLowerCase()));
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeOnEscape); };
+  }, [open]);
+
+  return <div className={`workshop-combobox ${open ? 'is-open' : ''}`} ref={rootRef}>
+    <input value={value} role="combobox" aria-autocomplete="list" aria-controls={menuId} aria-expanded={open} aria-haspopup="listbox" onFocus={() => setOpen(true)} onChange={(event) => { onChange(event.target.value); setOpen(true); }} placeholder={placeholder} />
+    <button type="button" className="workshop-combobox-toggle" aria-label="显示候选项" tabIndex={-1} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((current) => !current)}>⌄</button>
+    {open && <div className="workshop-combobox-menu" id={menuId} role="listbox">{filteredOptions.length ? filteredOptions.map((option, index) => <button type="button" role="option" aria-selected={option.value === value.trim()} className={option.tone ? `tone-${option.tone}` : ''} key={option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option.value); onOptionSelect?.(option.value); setOpen(false); }}><span>{String(index + 1).padStart(2, '0')}</span><strong>{option.label}</strong><i aria-hidden="true">{option.value === value.trim() ? '◆' : '›'}</i></button>) : <small>NO MATCH / 可作为新项目添加</small>}</div>}
+  </div>;
+}
+
 function ArchiveDateFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => value ? new Date(`${value}T00:00:00`) : new Date());
@@ -819,35 +867,80 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     list.replaceWith(replacement);
     return replacement;
   };
+  const removeListFormatting = (list: HTMLUListElement | HTMLOListElement) => {
+    const fragment = document.createDocumentFragment();
+    let lastLine: HTMLDivElement | null = null;
+    Array.from(list.children).filter((item): item is HTMLLIElement => item instanceof HTMLLIElement).forEach((item) => {
+      const line = document.createElement('div');
+      Array.from(item.childNodes).forEach((node) => {
+        if (node instanceof HTMLInputElement && node.type === 'checkbox') return;
+        if (node instanceof HTMLSpanElement && node.classList.contains('checklist-entry')) {
+          while (node.firstChild) line.append(node.firstChild);
+          return;
+        }
+        line.append(node);
+      });
+      if (!line.childNodes.length) line.append(document.createElement('br'));
+      fragment.append(line);
+      lastLine = line;
+    });
+    list.replaceWith(fragment);
+    return lastLine;
+  };
   const format = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList' | 'insertOrderedList' | 'checklist') => {
     editorRef.current?.focus();
     restoreSelection();
     let lists = selectedLists();
     if (command === 'checklist') {
-      if (!lists.length) {
-        const existingLists = new Set(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol'));
-        document.execCommand('insertUnorderedList');
-        lists = selectedLists();
-        // Empty contenteditables can lose their selection during execCommand.
-        // In that case, target the list that this command just created instead
-        // of leaving its browser-default bullet styling in place.
+      const checklistIsActive = lists.length > 0 && lists.every((list) => list instanceof HTMLUListElement && list.classList.contains('checklist'));
+      if (checklistIsActive) {
+        const lastLine = lists.map(removeListFormatting).at(-1);
+        if (lastLine) {
+          const range = document.createRange();
+          range.selectNodeContents(lastLine);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      } else {
         if (!lists.length) {
-          lists = Array.from(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol') ?? [])
-            .filter((list) => !existingLists.has(list));
+          const existingLists = new Set(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol'));
+          document.execCommand('insertUnorderedList');
+          lists = selectedLists();
+          // Empty contenteditables can lose their selection during execCommand.
+          // In that case, target the list that this command just created instead
+          // of leaving its browser-default bullet styling in place.
+          if (!lists.length) {
+            lists = Array.from(editorRef.current?.querySelectorAll<HTMLUListElement | HTMLOListElement>('ul,ol') ?? [])
+              .filter((list) => !existingLists.has(list));
+          }
+        }
+        const replacements = lists.map((list) => replaceList(list, 'ul', true));
+        const replacement = replacements.at(-1);
+        if (replacement) {
+          const range = document.createRange();
+          range.selectNodeContents(replacement);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
         }
       }
-      const replacements = lists.map((list) => replaceList(list, 'ul', true));
-      const replacement = replacements.at(-1);
-      if (replacement) {
-        const range = document.createRange();
-        range.selectNodeContents(replacement);
-        range.collapse(false);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-      }
     } else if (command === 'insertUnorderedList' || command === 'insertOrderedList') {
-      if (lists.length) {
+      const targetTag = command === 'insertUnorderedList' ? 'ul' : 'ol';
+      const listFormatIsActive = lists.length > 0 && lists.every((list) => list.tagName.toLowerCase() === targetTag && !list.classList.contains('checklist'));
+      if (listFormatIsActive) {
+        const lastLine = lists.map(removeListFormatting).at(-1);
+        if (lastLine) {
+          const range = document.createRange();
+          range.selectNodeContents(lastLine);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      } else if (lists.length) {
         const replacements = lists.map((list) => replaceList(list, command === 'insertUnorderedList' ? 'ul' : 'ol'));
         const replacement = replacements.at(-1);
         if (replacement) {
@@ -1022,6 +1115,7 @@ export default function Home() {
   const [customType, setCustomType] = useState('');
   const [customTypeColor, setCustomTypeColor] = useState<TypeColor>('purple');
   const [customLocation, setCustomLocation] = useState('');
+  const [selectedWorkshopLocation, setSelectedWorkshopLocation] = useState('');
   const [sleepRecords, setSleepRecords] = useState<SleepRecord[]>([]);
   const [sleepLoading, setSleepLoading] = useState(true);
   const [sleepSubmitting, setSleepSubmitting] = useState(false);
@@ -1529,6 +1623,62 @@ export default function Home() {
     else setWakeAt(value);
     setSleepPickerField(null);
   };
+  const saveWorkshopType = (event: FormEvent) => {
+    event.preventDefault();
+    const value = customType.trim();
+    if (!value || value === RETIRED_ROUTINE_TYPE) {
+      setToast('请输入可用的任务类型名称');
+      return;
+    }
+    const existingType = settings.taskTypes.find((item) => item.value === value);
+    if (existingType) {
+      setSettings((current) => ({
+        ...current,
+        taskTypes: sortedTaskTypes(current.taskTypes.map((item) => item.value === existingType.value ? { ...item, color: customTypeColor } : item)),
+      }));
+      setToast('任务类型颜色已调整');
+      return;
+    }
+    setSettings((current) => ({ ...current, taskTypes: sortedTaskTypes([...current.taskTypes, { value, color: customTypeColor, custom: true }]) }));
+    setCustomType('');
+    setToast('任务类型已添加');
+  };
+  const saveWorkshopLocation = (event: FormEvent) => {
+    event.preventDefault();
+    const value = customLocation.trim();
+    if (!value) {
+      setToast('请输入可用的地点名称');
+      return;
+    }
+    if (selectedWorkshopLocation) {
+      if (value !== selectedWorkshopLocation && settings.locations.some((item) => item.value === value)) {
+        setToast('该地点已经存在');
+        return;
+      }
+      setTasks((current) => current.map((task) => (
+        task.location === selectedWorkshopLocation ? { ...task, location: value } : task
+      )));
+      setSettings((current) => ({
+        ...current,
+        locations: current.locations.map((item) => (
+          item.value === selectedWorkshopLocation ? { ...item, value } : item
+        )),
+        defaultLocation: current.defaultLocation === selectedWorkshopLocation ? value : current.defaultLocation,
+      }));
+      setSelectedWorkshopLocation(value);
+      setCustomLocation(value);
+      setToast('地点已调整');
+      return;
+    }
+    if (settings.locations.some((item) => item.value === value)) {
+      setToast('该地点已经存在');
+      return;
+    }
+    setSettings((current) => ({ ...current, locations: [...current.locations, { value, custom: true }] }));
+    setCustomLocation('');
+    setSelectedWorkshopLocation('');
+    setToast('地点已添加');
+  };
   const navigateTo = (nextView: View) => {
     setDayAgendaOpen(false);
     setDraft(null);
@@ -1707,8 +1857,21 @@ export default function Home() {
 
     {view === 'settings' && <section className="settings-page">
       <header className="page-banner"><span>05</span><div><p>PERSONAL OPERATION RULES</p><h2>DESIGN</h2></div><strong>AUTO-SAVED</strong></header>
-      <div className="settings-grid"><section className="settings-panel profile-panel"><header><span>00</span><div><h3>PLAYER IDENTITY</h3><p>同步更新标题上方与主菜单中的用户名</p></div></header><div className="profile-console"><div className="profile-badge"><span>ACTIVE PLAYER</span><strong>{settings.username}</strong><small>SWORD ART ONLINE · LOCAL PROFILE</small></div><label><span>USERNAME / 用户名</span><input maxLength={32} value={settings.username} onChange={(event) => setSettings({ ...settings, username: event.target.value })} onBlur={() => setSettings((current) => ({ ...current, username: current.username.trim() || DEFAULT_SETTINGS.username }))} placeholder="输入用户名" /><small>最多 32 个字符，修改后自动保存到本地 SQLite。</small></label></div></section><section className="settings-panel loadout-studio"><header><span>01</span><div><h3>NEW MISSION DEFAULTS</h3><p>只决定新建任务时自动填入的内容</p></div></header><div className="loadout-console"><div className={`loadout-preview type-${typeColor(settings.defaultTaskType, settings)}`}><span>PREVIEW</span><strong>下一项新任务</strong><p>{settings.defaultTaskType}</p><small>{settings.defaultLocation} · 中优先级</small></div><div className="loadout-controls"><label><span>TASK TYPE / 默认类型</span><select value={settings.defaultTaskType} onChange={(event) => setSettings({ ...settings, defaultTaskType: event.target.value })}>{sortedTaskTypes(settings.taskTypes).map((type) => <option key={type.value}>{type.value}</option>)}</select></label><label><span>LOCATION / 默认地点</span><select value={settings.defaultLocation} onChange={(event) => setSettings({ ...settings, defaultLocation: event.target.value })}>{settings.locations.map((location) => <option key={location.value}>{location.value}</option>)}</select></label><p>优先级不设默认偏好，新任务统一从“中”开始，随后可在任务详情里调整。</p></div></div></section>
-        <section className="settings-panel custom-panel"><header><span>02</span><div><h3>OPTION WORKSHOP</h3><p>扩充你的任务词库</p></div></header><div className="workshop-body"><form onSubmit={(event) => { event.preventDefault(); if (!customType.trim() || customType.trim() === RETIRED_ROUTINE_TYPE) return; setSettings({ ...settings, taskTypes: sortedTaskTypes([...settings.taskTypes, { value: customType.trim(), color: customTypeColor, custom: true }]) }); setCustomType(''); }}><label><span>新增任务类型</span><input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="例如：🎵 音乐" /></label><div className="color-choices">{(['purple', 'blue', 'green', 'yellow'] as TypeColor[]).map((color) => <button type="button" aria-label={color} className={`${color} ${customTypeColor === color ? 'active' : ''}`} key={color} onClick={() => setCustomTypeColor(color)} />)}</div><button className="settings-add">＋ 添加类型</button></form><form onSubmit={(event) => { event.preventDefault(); if (!customLocation.trim()) return; setSettings({ ...settings, locations: [...settings.locations, { value: customLocation.trim(), custom: true }] }); setCustomLocation(''); }}><label><span>新增地点</span><input value={customLocation} onChange={(e) => setCustomLocation(e.target.value)} placeholder="例如：☕ 咖啡店" /></label><button className="settings-add">＋ 添加地点</button></form></div><div className="custom-list">{sortedTaskTypes(settings.taskTypes).filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, taskTypes: settings.taskTypes.filter((type) => type.value !== item.value), defaultTaskType: settings.defaultTaskType === item.value ? '🧬 个人' : settings.defaultTaskType })}>{item.value}<span>×</span></button>)}{settings.locations.filter((item) => item.custom).map((item) => <button key={item.value} onClick={() => setSettings({ ...settings, locations: settings.locations.filter((location) => location.value !== item.value), defaultLocation: settings.defaultLocation === item.value ? '🏠 家' : settings.defaultLocation })}>{item.value}<span>×</span></button>)}</div></section>
+      <div className="settings-grid"><section className="settings-panel profile-panel"><header><span>00</span><div><h3>PLAYER IDENTITY</h3><p>同步更新标题上方与主菜单中的用户名</p></div></header><div className="profile-console"><div className="profile-badge"><span>ACTIVE PLAYER</span><strong>{settings.username}</strong><small>SWORD ART ONLINE · LOCAL PROFILE</small></div><label><span>USERNAME / 用户名</span><input maxLength={32} value={settings.username} onChange={(event) => setSettings({ ...settings, username: event.target.value })} onBlur={() => setSettings((current) => ({ ...current, username: current.username.trim() || DEFAULT_SETTINGS.username }))} placeholder="输入用户名" /><small>最多 32 个字符，修改后自动保存到本地 SQLite。</small></label></div></section><section className="settings-panel loadout-studio"><header><span>01</span><div><h3>NEW MISSION DEFAULTS</h3><p>只决定新建任务时自动填入的内容</p></div></header><div className="loadout-console"><div className={`loadout-preview type-${typeColor(settings.defaultTaskType, settings)}`}><span>PREVIEW</span><strong>下一项新任务</strong><p>{settings.defaultTaskType}</p><small>{settings.defaultLocation} · 中优先级</small></div><div className="loadout-controls"><label><span>TASK TYPE / 默认类型</span><SignalSelect value={settings.defaultTaskType} label="TASK TYPE / 默认类型" mark="◈" options={sortedTaskTypes(settings.taskTypes).map((type) => ({ value: type.value, label: type.value, tone: type.color }))} onChange={(defaultTaskType) => setSettings((current) => ({ ...current, defaultTaskType }))} /></label><label><span>LOCATION / 默认地点</span><SignalSelect value={settings.defaultLocation} label="LOCATION / 默认地点" mark="⌖" options={settings.locations.map((location) => ({ value: location.value, label: location.value }))} onChange={(defaultLocation) => setSettings((current) => ({ ...current, defaultLocation }))} /></label><p>优先级不设默认偏好，新任务统一从“中”开始，随后可在任务详情里调整。</p></div></div></section>
+        <section className="settings-panel custom-panel">
+          <header><span>02</span><div><h3>OPTION WORKSHOP</h3><p>输入新项目，或从候选项调整任务类型和地点</p></div></header>
+          <div className="workshop-body">
+            <form onSubmit={saveWorkshopType}>
+              <label><span>任务类型</span><WorkshopCombobox value={customType} options={sortedTaskTypes(settings.taskTypes).map((type) => ({ value: type.value, label: type.value, tone: type.color }))} onChange={(value) => { setCustomType(value); const existingType = settings.taskTypes.find((type) => type.value === value.trim()); if (existingType) setCustomTypeColor(existingType.color); }} onOptionSelect={(value) => { const existingType = settings.taskTypes.find((type) => type.value === value); if (existingType) setCustomTypeColor(existingType.color); }} placeholder="输入新类型，或搜索现有类型" /></label>
+              <div className="color-choices">{(['purple', 'blue', 'green', 'yellow'] as TypeColor[]).map((color) => <button type="button" aria-label={color} className={`${color} ${customTypeColor === color ? 'active' : ''}`} key={color} onClick={() => setCustomTypeColor(color)} />)}</div>
+              <button className="settings-add" disabled={!customType.trim()}>{settings.taskTypes.some((type) => type.value === customType.trim()) ? '保存调整' : '＋ 添加类型'}</button>
+            </form>
+            <form onSubmit={saveWorkshopLocation}>
+              <label><span>地点</span><WorkshopCombobox value={customLocation} options={settings.locations.map((location) => ({ value: location.value, label: location.value }))} onChange={(value) => { setCustomLocation(value); if (!value.trim()) setSelectedWorkshopLocation(''); }} onOptionSelect={setSelectedWorkshopLocation} placeholder="输入新地点，或搜索现有地点" /></label>
+              <button className="settings-add" disabled={!customLocation.trim() || (!selectedWorkshopLocation && settings.locations.some((location) => location.value === customLocation.trim()))}>{selectedWorkshopLocation ? '保存调整' : settings.locations.some((location) => location.value === customLocation.trim()) ? '地点已存在' : '＋ 添加地点'}</button>
+            </form>
+          </div>
+        </section>
         <section className="settings-panel recurrence-control-panel">
           <header><span>03</span><div><h3>REPEAT CONTROL</h3><p>循环任务的总控与活动队列</p></div><strong>{activeRecurringTasks.length} ACTIVE</strong></header>
           <div className="repeat-control-grid">
