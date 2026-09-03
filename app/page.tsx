@@ -1084,7 +1084,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     draggable tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
     <div className="card-stripe" />
-    <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon"><i aria-hidden="true">↻</i></span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
+    <div className="card-topline"><span className="task-type">{task.location}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon"><i aria-hidden="true">↻</i></span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
     <h3>{task.title}</h3>
     <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{descriptionToText(task.description) || '\u00a0'}</p>
     {task.status === 'pending' && <span className="mission-state-signal pending-state-signal" aria-hidden="true">WAIT</span>}
