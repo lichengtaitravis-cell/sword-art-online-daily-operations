@@ -17,7 +17,7 @@ type CountdownKind = 'start' | 'deadline';
 type PendingSort = 'priority' | 'start' | 'deadline' | 'custom';
 type BoardDensity = 'standard' | 'compact';
 type ArchiveFilterOption = { value: string; label: string; tone?: string };
-type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'in-progress' | 'completed';
+type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'pending-range' | 'in-progress' | 'completed';
 type DayScheduleBlock = { id: string; task: Task; startMinute: number; endMinute: number; labelStartMinute: number; labelEndMinute: number; lane: number; laneCount: number; offline: boolean; variant: ScheduleVariant; continuesBefore: boolean; continuesAfter: boolean; terminal: boolean };
 
 type Task = {
@@ -415,6 +415,13 @@ function descriptionMarkup(value: string) {
 
 function taskScheduleRange(task: Task, referenceNow = new Date()) {
   if (task.status === 'pending') {
+    if (task.startedAt && task.dueAt) {
+      const start = new Date(task.startedAt);
+      const end = new Date(task.dueAt);
+      if (!Number.isNaN(+start) && !Number.isNaN(+end) && +end > +start) {
+        return { start, end, variant: 'pending-range' as const };
+      }
+    }
     if (task.startedAt) {
       const start = new Date(task.startedAt);
       return { start, end: new Date(+start + 75 * 60_000), variant: 'pending-start' as const };
@@ -441,7 +448,7 @@ function calendarTaskDate(task: Task, referenceNow = new Date()) {
 }
 
 function taskOccursOnCalendarDay(task: Task, dayKey: string, referenceNow = new Date()) {
-  if (task.status === 'pending') {
+  if (task.status === 'pending' && !(task.startedAt && task.dueAt)) {
     const marker = task.startedAt || task.dueAt;
     return Boolean(marker) && localDateKey(new Date(marker)) === dayKey;
   }
@@ -470,6 +477,7 @@ function minuteLabel(minutes: number) {
 function scheduleTimeLabel(variant: ScheduleVariant, startMinute: number, endMinute: number, terminal = true) {
   if (variant === 'pending-start') return `START ${minuteLabel(startMinute)}`;
   if (variant === 'pending-deadline') return `DEADLINE ${minuteLabel(endMinute)}`;
+  if (variant === 'pending-range') return `PLAN ${minuteLabel(startMinute)}–${minuteLabel(endMinute)}`;
   if (variant === 'in-progress') return terminal ? `${minuteLabel(startMinute)} → NOW ${minuteLabel(endMinute)}` : `${minuteLabel(startMinute)}–${minuteLabel(endMinute)}`;
   return `${minuteLabel(startMinute)}–${minuteLabel(endMinute)}`;
 }
@@ -488,7 +496,7 @@ function taskWindowOnDay(task: Task, dayKey: string, referenceNow = new Date()) 
   const end = new Date(Math.min(+range.end, +actionEnd));
   if (+end <= +start) return null;
   const realDuration = +range.end - +range.start;
-  const canCrossDay = range.variant === 'in-progress' || range.variant === 'completed';
+  const canCrossDay = range.variant === 'pending-range' || range.variant === 'in-progress' || range.variant === 'completed';
   return { startMinute: (+start - +dayStart) / 60_000, endMinute: (+end - +dayStart) / 60_000, variant: range.variant, continuesBefore: canCrossDay && +range.start < +actionStart && realDuration > 0, continuesAfter: canCrossDay && +range.start < +calendarEnd && +range.end > +calendarEnd && realDuration > 0, endsAfterWindow: +range.end > +actionEnd };
 }
 
@@ -1108,6 +1116,7 @@ export default function Home() {
   const reminderBands = useRef(new Map<string, CountdownUrgency>());
   const remindersReady = useRef(false);
   const pendingSortRef = useRef<HTMLDivElement>(null);
+  const scheduleTimelineRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>('board');
   const [viewRestored, setViewRestored] = useState(false);
   const [dialogStateRestored, setDialogStateRestored] = useState(false);
@@ -1744,6 +1753,13 @@ export default function Home() {
     const window = taskWindowOnDay(task, selectedDay, now);
     return window ? [{ task, ...window, displayStartMinute: actionDayMinute(window.startMinute) }] : [];
   }).sort((a, b) => a.displayStartMinute - b.displayStartMinute), [selectedDayTasks, selectedDay, now]);
+  const linkScheduleMapTask = (taskId: string) => {
+    setLinkedScheduleTaskId(taskId);
+    const timeline = scheduleTimelineRef.current;
+    const entry = Array.from(timeline?.querySelectorAll<HTMLButtonElement>('button[data-schedule-task-id]') ?? [])
+      .find((item) => item.dataset.scheduleTaskId === taskId);
+    entry?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+  };
   const activeNav = navItems.find((item) => item.id === view)!;
   const activeCountdowns = missionTasks.flatMap((task) => countdownSignals(task, now)).sort(compareCountdownSignals);
   const visibleCountdowns = activeCountdowns.slice(0, 2);
@@ -1949,9 +1965,9 @@ export default function Home() {
             const hideLabel = duration < 2.8 || laneWidth < 13;
             const compactLabel = !hideLabel && (duration < 4.8 || laneWidth < 20);
             const blockLabel = `${scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)} ${block.task.title}`;
-            return <button key={block.id} aria-label={blockLabel} title={blockLabel} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : compactLabel ? 'is-compact' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''} ${linkedScheduleTaskId === block.task.id ? 'is-linked-highlight' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
+            return <button key={block.id} aria-label={blockLabel} title={blockLabel} className={`schedule-block type-${typeColor(block.task.taskType, settings)} variant-${block.variant} ${hideLabel ? 'is-brief' : compactLabel ? 'is-compact' : ''} ${block.offline ? 'is-offline' : ''} ${crossDay ? 'is-cross-day' : ''} ${block.continuesBefore ? 'continues-before' : ''} ${block.continuesAfter ? 'continues-after' : ''} ${linkedScheduleTaskId === block.task.id ? 'is-linked-highlight' : ''}`} style={{ top: `${block.startMinute / (ACTION_DAY_DISPLAY_MINUTES / 100)}%`, height: `${duration}%`, left: `calc(${block.lane / block.laneCount * 100}% + 4px)`, width: `calc(${100 / block.laneCount}% - 8px)` }} onMouseEnter={() => linkScheduleMapTask(block.task.id)} onMouseLeave={() => setLinkedScheduleTaskId('')} onFocus={() => linkScheduleMapTask(block.task.id)} onBlur={() => setLinkedScheduleTaskId('')} onClick={() => setDraft(block.task)}><time>{scheduleTimeLabel(block.variant, block.labelStartMinute, block.labelEndMinute, block.terminal)}</time><strong>{block.task.title}</strong>{crossDay && <span className="schedule-cross-day">{block.continuesBefore && block.continuesAfter ? '↕ THROUGH' : block.continuesBefore ? '↳ FROM PREV' : '↘ NEXT DAY'}</span>}</button>;
           })}</div>
-        </div></section><section className="schedule-list"><header><span>AFTER SCHOOL AGENDA</span><strong>当天任务表</strong></header><div className="timeline">{dayTimelineEntries.map((entry) => <button key={entry.task.id} onMouseEnter={() => setLinkedScheduleTaskId(entry.task.id)} onMouseLeave={() => setLinkedScheduleTaskId('')} onFocus={() => setLinkedScheduleTaskId(entry.task.id)} onBlur={() => setLinkedScheduleTaskId('')} onClick={() => setDraft(entry.task)}><time>{scheduleTimeLabel(entry.variant, entry.startMinute, entry.endMinute, !entry.continuesAfter)}</time><i className={`type-${typeColor(entry.task.taskType, settings)}`} /><div><strong>{entry.task.title}</strong><span>{entry.task.taskType} · {entry.task.location}</span></div></button>)}{!dayTimelineEntries.length && <div className="agenda-empty"><strong>FREE DAY!</strong><span>这一天还没有安排任务</span></div>}</div><button className="schedule-add" onClick={() => openNewTask('pending', new Date(`${selectedDay}T12:00`).toISOString())}>＋ ADD MISSION / 添加任务</button></section></div>
+        </div></section><section className="schedule-list"><header><span>AFTER SCHOOL AGENDA</span><strong>当天任务表</strong></header><div className="timeline" ref={scheduleTimelineRef}>{dayTimelineEntries.map((entry) => <button key={entry.task.id} data-schedule-task-id={entry.task.id} className={linkedScheduleTaskId === entry.task.id ? 'is-linked-highlight' : ''} onMouseEnter={() => setLinkedScheduleTaskId(entry.task.id)} onMouseLeave={() => setLinkedScheduleTaskId('')} onFocus={() => setLinkedScheduleTaskId(entry.task.id)} onBlur={() => setLinkedScheduleTaskId('')} onClick={() => setDraft(entry.task)}><time>{scheduleTimeLabel(entry.variant, entry.startMinute, entry.endMinute, !entry.continuesAfter)}</time><i className={`type-${typeColor(entry.task.taskType, settings)}`} /><div><strong>{entry.task.title}</strong><span>{entry.task.taskType} · {entry.task.location}</span></div></button>)}{!dayTimelineEntries.length && <div className="agenda-empty"><strong>FREE DAY!</strong><span>这一天还没有安排任务</span></div>}</div><button className="schedule-add" onClick={() => openNewTask('pending', new Date(`${selectedDay}T12:00`).toISOString())}>＋ ADD MISSION / 添加任务</button></section></div>
       </section>
     </div>}
 
