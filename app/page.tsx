@@ -875,12 +875,12 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
       Array.from(item.childNodes).forEach((node) => {
         if (node instanceof HTMLInputElement && node.type === 'checkbox') return;
         if (node instanceof HTMLSpanElement && node.classList.contains('checklist-entry')) {
-          while (node.firstChild) line.append(node.firstChild);
+          while (node.firstChild) line.appendChild(node.firstChild);
           return;
         }
-        line.append(node);
+        line.appendChild(node);
       });
-      if (!line.childNodes.length) line.append(document.createElement('br'));
+      if (!line.childNodes.length) line.appendChild(document.createElement('br'));
       fragment.append(line);
       lastLine = line;
     });
