@@ -593,13 +593,10 @@ function countdownSignals(task: Task, now: Date): CountdownSignal[] {
     const urgency = countdownUrgency(task.dueAt, now);
     if (urgency) signals.push({ task, kind: 'deadline', urgency, targetAt: task.dueAt });
   }
-  // Once both windows have been breached, the deadline is the actionable
-  // failure state. Suppress the redundant late-start signal everywhere that
-  // consumes this helper (HUD, card, and impact reminder).
-  if (signals.length === 2 && signals.every((signal) => signal.urgency === 'overdue')) {
-    return signals.filter((signal) => signal.kind === 'deadline');
-  }
-  return signals;
+  // A deadline always supersedes a simultaneous start signal. This keeps one
+  // task from occupying two HUD slots or showing competing card instruments.
+  const deadline = signals.find((signal) => signal.kind === 'deadline');
+  return deadline ? [deadline] : signals;
 }
 
 function compareCountdownSignals(a: CountdownSignal, b: CountdownSignal) {
@@ -1087,7 +1084,7 @@ function TaskCard({ task, color, now, dragging, landed, onOpen, onStart, onDragS
     draggable tabIndex={0} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onClick={onOpen}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); } }}>
     <div className="card-stripe" />
-    <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon">↻</span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
+    <div className="card-topline"><span className="task-type">{task.taskType}</span><div className="task-flags">{task.recurrence !== 'none' && <span title={recurrenceLabel(task)} className="repeat-icon"><i aria-hidden="true">↻</i></span>}<span className="priority-label">{task.priority === 'must' ? 'MUST' : task.priority === 'high' ? 'HIGH' : task.priority === 'medium' ? 'MID' : 'LOW'}</span></div></div>
     <h3>{task.title}</h3>
     <p className={`card-description ${task.description ? '' : 'is-empty'}`} aria-hidden={task.description ? undefined : true}>{descriptionToText(task.description) || '\u00a0'}</p>
     {task.status === 'pending' && <span className="mission-state-signal pending-state-signal" aria-hidden="true">WAIT</span>}
