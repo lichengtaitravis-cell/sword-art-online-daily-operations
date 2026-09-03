@@ -993,10 +993,10 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
         .slice(Array.from(item.parentElement.children).indexOf(item) + 1)
         .filter((sibling): sibling is HTMLLIElement => sibling instanceof HTMLLIElement);
       const followingList = followingItems.length ? list.cloneNode(false) as HTMLUListElement : null;
-      followingItems.forEach((followingItem) => followingList?.append(followingItem));
+      followingItems.forEach((followingItem) => followingList?.appendChild(followingItem));
       item.remove();
       const paragraph = document.createElement('div');
-      paragraph.append(document.createElement('br'));
+      paragraph.appendChild(document.createElement('br'));
       if (list.children.length) list.insertAdjacentElement('afterend', paragraph);
       else list.replaceWith(paragraph);
       if (followingList) paragraph.insertAdjacentElement('afterend', followingList);
