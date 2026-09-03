@@ -887,6 +887,26 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     list.replaceWith(fragment);
     return lastLine;
   };
+  const formatSelectedChecklistText = (command: 'bold' | 'italic' | 'underline') => {
+    const selection = window.getSelection();
+    if (!editorRef.current || !selection?.rangeCount) return false;
+    const selectedRange = selection.getRangeAt(0);
+    if (selectedRange.collapsed) return false;
+    const entries = Array.from(editorRef.current.querySelectorAll<HTMLSpanElement>('ul.checklist .checklist-entry'))
+      .filter((entry) => selectedRange.intersectsNode(entry));
+    if (!entries.length) return false;
+    const originalRange = selectedRange.cloneRange();
+    entries.forEach((entry) => {
+      const entryRange = document.createRange();
+      entryRange.selectNodeContents(entry);
+      selection.removeAllRanges();
+      selection.addRange(entryRange);
+      document.execCommand(command);
+    });
+    selection.removeAllRanges();
+    selection.addRange(originalRange);
+    return true;
+  };
   const format = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList' | 'insertOrderedList' | 'checklist') => {
     editorRef.current?.focus();
     restoreSelection();
@@ -918,14 +938,8 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
         }
         const replacements = lists.map((list) => replaceList(list, 'ul', true));
         const replacement = replacements.at(-1);
-        if (replacement) {
-          const range = document.createRange();
-          range.selectNodeContents(replacement);
-          range.collapse(false);
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-        }
+        const lastItem = replacement?.lastElementChild;
+        if (lastItem instanceof HTMLLIElement) placeCaretAtChecklistTextEnd(lastItem);
       }
     } else if (command === 'insertUnorderedList' || command === 'insertOrderedList') {
       const targetTag = command === 'insertUnorderedList' ? 'ul' : 'ol';
@@ -953,7 +967,9 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
         }
       }
       else document.execCommand(command);
-    } else document.execCommand(command);
+    } else if (command === 'bold' || command === 'italic' || command === 'underline') {
+      if (!formatSelectedChecklistText(command)) document.execCommand(command);
+    }
     rememberSelection();
     onChange(editorRef.current?.innerHTML ?? '');
   };
@@ -965,6 +981,29 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     const item = element?.closest('li');
     if (!(item instanceof HTMLLIElement) || !editorRef.current.contains(item) || !item.parentElement?.matches('ul.checklist')) return;
     event.preventDefault();
+    const entry = Array.from(item.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    if (!entry?.textContent?.replaceAll('\u00a0', '').trim()) {
+      const list = item.parentElement;
+      const followingItems = Array.from(item.parentElement.children)
+        .slice(Array.from(item.parentElement.children).indexOf(item) + 1)
+        .filter((sibling): sibling is HTMLLIElement => sibling instanceof HTMLLIElement);
+      const followingList = followingItems.length ? list.cloneNode(false) as HTMLUListElement : null;
+      followingItems.forEach((followingItem) => followingList?.append(followingItem));
+      item.remove();
+      const paragraph = document.createElement('div');
+      paragraph.append(document.createElement('br'));
+      if (list.children.length) list.insertAdjacentElement('afterend', paragraph);
+      else list.replaceWith(paragraph);
+      if (followingList) paragraph.insertAdjacentElement('afterend', followingList);
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      rememberSelection();
+      onChange(editorRef.current.innerHTML);
+      return;
+    }
     const nextItem = createChecklistItem();
     item.insertAdjacentElement('afterend', nextItem);
     placeCaretAtChecklistTextStart(nextItem);
