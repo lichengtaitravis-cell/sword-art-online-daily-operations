@@ -84,7 +84,7 @@ const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
 const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
 const PENDING_SORT_SESSION_KEY = 'sao-planner-pending-sort-v1';
 const BOARD_DENSITY_SESSION_KEY = 'sao-planner-board-density-v1';
-const SLEEP_STANDARD_LIMIT = 10;
+const SLEEP_STANDARD_LIMIT = 9;
 const VISIBLE_LIMIT: Record<BoardDensity, Record<Status, number>> = {
   standard: { pending: 5, inProgress: 5, completed: 5 },
   compact: { pending: 9, inProgress: 9, completed: 9 },
