@@ -293,11 +293,16 @@ function PieChart({ title, subtitle, segments }: {
 
 function MetricTrend({ title, values, tone }: { title: string; values: { label: string; value: number | null }[]; tone: 'yellow' | 'orange' }) {
   const [hoveredPoint, setHoveredPoint] = useState<{ label: string; value: number; x: number; y: number } | null>(null);
-  const points = values.flatMap((item, index) => item.value === null ? [] : [{
-    x: values.length === 1 ? 150 : 12 + index * 276 / Math.max(1, values.length - 1),
-    y: 96 - item.value * .78,
-    ...item,
-  }]);
+  const points = values.reduce<{ label: string; value: number; x: number; y: number }[]>((result, item, index) => {
+    if (item.value === null) return result;
+    result.push({
+      label: item.label,
+      value: item.value,
+      x: values.length === 1 ? 150 : 12 + index * 276 / Math.max(1, values.length - 1),
+      y: 96 - item.value * .78,
+    });
+    return result;
+  }, []);
   return <div className={`metric-trend trend-${tone}`}>
     <span>{title}</span>
     <svg viewBox="0 0 300 112" preserveAspectRatio="none" role="img" aria-label={title}>
