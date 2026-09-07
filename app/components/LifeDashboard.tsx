@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { DashboardDrilldown, type DashboardDrilldownData, type DrilldownItem } from './DashboardDrilldown';
+import { DashboardDrilldown, type DashboardDrilldownData, type DrilldownItem, type DrilldownTone } from './DashboardDrilldown';
 import type { DeadlineEvent } from '../lib/deadline-store';
 import type { SleepRecord } from '../lib/sleep-store';
 
@@ -54,6 +54,7 @@ type Allocation = {
 
 const DAY_MS = 24 * 60 * 60_000;
 const MINUTE_MS = 60_000;
+const IN_TIME_GRACE_MS = 60 * MINUTE_MS;
 const PIE_RADIUS = 82;
 const PIE_CIRCUMFERENCE = 2 * Math.PI * PIE_RADIUS;
 const TONES: DashboardTone[] = ['purple', 'blue', 'green', 'yellow'];
@@ -74,6 +75,12 @@ const PRIORITY_META: Record<DashboardPriority, { label: string; tone: string }> 
   high: { label: 'HIGH', tone: 'priority-high' },
   medium: { label: 'MID', tone: 'priority-medium' },
   low: { label: 'LOW', tone: 'priority-low' },
+};
+const PRIORITY_DRILLDOWN_TONE: Record<DashboardPriority, DrilldownTone> = {
+  must: 'red',
+  high: 'orange',
+  medium: 'yellow',
+  low: 'muted',
 };
 
 function validDate(value: string) {
@@ -184,17 +191,31 @@ function taskStatusLabel(status: DashboardStatus) {
   return 'PENDING';
 }
 
+function isDeadlineExtension(event: DeadlineEvent) {
+  const oldDueAt = validDate(event.oldDueAt);
+  const newDueAt = validDate(event.newDueAt);
+  return Boolean(oldDueAt && newDueAt && +newDueAt > +oldDueAt);
+}
+
+function completionDeadlineDelta(task: DashboardTask) {
+  const completedAt = validDate(task.completedAt);
+  const dueAt = validDate(task.dueAt);
+  return completedAt && dueAt ? +completedAt - +dueAt : null;
+}
+
+function isInTimeCompletion(task: DashboardTask) {
+  const delta = completionDeadlineDelta(task);
+  if (delta === null) return false;
+  return delta <= (task.tone === 'blue' ? 0 : IN_TIME_GRACE_MS);
+}
+
 function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: DeadlineEvent[], sleepRecords: SleepRecord[], now: Date) {
   const periodTasks = tasks.filter((task) => taskBelongsToPeriod(task, period));
   const mustTasks = periodTasks.filter((task) => task.priority === 'must');
   const clears = tasks.filter((task) => inPeriod(task.completedAt, period));
   const deadlineClears = clears.filter((task) => validDate(task.dueAt));
-  const inTimeCount = deadlineClears.filter((task) => {
-    const completedAt = validDate(task.completedAt);
-    const dueAt = validDate(task.dueAt);
-    return completedAt && dueAt && +completedAt <= +dueAt;
-  }).length;
-  const periodEvents = events.filter((event) => event.priorityAtChange === 'must' && inPeriod(event.changedAt, period));
+  const inTimeCount = deadlineClears.filter(isInTimeCompletion).length;
+  const periodEvents = events.filter((event) => event.priorityAtChange === 'must' && isDeadlineExtension(event) && inPeriod(event.changedAt, period));
   const changedMustIds = new Set(periodEvents.map((event) => event.taskId).filter((id) => mustTasks.some((task) => task.id === id)));
   const trackedTasks = tasks.filter((task) => intervalMinutes(task, period, now) > 0);
   const allocations = new Map<string, Allocation>();
@@ -378,12 +399,14 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   });
   const openInTimeDrilldown = (targetPeriod: CampaignPeriod) => {
     const deadlineClears = tasks.filter((task) => inPeriod(task.completedAt, targetPeriod) && validDate(task.dueAt));
-    const inTime = deadlineClears.filter((task) => +new Date(task.completedAt) <= +new Date(task.dueAt));
-    const late = deadlineClears.filter((task) => +new Date(task.completedAt) > +new Date(task.dueAt));
+    const inTime = deadlineClears.filter(isInTimeCompletion);
+    const late = deadlineClears.filter((task) => !isInTimeCompletion(task));
     const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now);
-    const deadlineItem = (task: DashboardTask, isInTime: boolean) => {
-      const distance = Math.abs(+new Date(task.dueAt) - +new Date(task.completedAt)) / MINUTE_MS;
-      return makeTaskItem(task, `${formatDuration(distance)} ${isInTime ? 'EARLY' : 'LATE'}`, `完成 ${formatMoment(task.completedAt)} · 最终截止 ${formatMoment(task.dueAt)}`, isInTime ? 'green' : 'red');
+    const deadlineItem = (task: DashboardTask) => {
+      const delta = completionDeadlineDelta(task) ?? 0;
+      const isInTime = isInTimeCompletion(task);
+      const outcome = delta <= 0 ? 'EARLY' : isInTime ? 'GRACE' : 'LATE';
+      return makeTaskItem(task, `${formatDuration(Math.abs(delta) / MINUTE_MS)} ${outcome}`, `完成 ${formatMoment(task.completedAt)} · 最终截止 ${formatMoment(task.dueAt)}`, isInTime ? outcome === 'GRACE' ? 'blue' : 'green' : 'red');
     };
     setDrilldown({
       index: '01',
@@ -394,14 +417,14 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       formula: `${targetMetrics.inTimeCount} IN TIME ÷ ${targetMetrics.inTimeSample} DEADLINE CLEARS`,
       accent: 'yellow',
       groups: [
-        { id: 'in-time', label: 'IN TIME / 准时完成', countLabel: `${inTime.length} MISSIONS`, items: inTime.map((task) => deadlineItem(task, true)) },
-        { id: 'late', label: 'OUT OF TIME / 超时完成', countLabel: `${late.length} MISSIONS`, items: late.map((task) => deadlineItem(task, false)) },
+        { id: 'in-time', label: 'IN TIME / 准时完成', countLabel: `${inTime.length} MISSIONS`, items: inTime.map(deadlineItem) },
+        { id: 'late', label: 'OUT OF TIME / 超时完成', countLabel: `${late.length} MISSIONS`, items: late.map(deadlineItem) },
       ],
     });
   };
   const openDeadlineDrilldown = (targetPeriod: CampaignPeriod) => {
     const mustTasks = tasks.filter((task) => task.priority === 'must' && taskBelongsToPeriod(task, targetPeriod));
-    const periodEvents = deadlineEvents.filter((event) => event.priorityAtChange === 'must' && inPeriod(event.changedAt, targetPeriod));
+    const periodEvents = deadlineEvents.filter((event) => event.priorityAtChange === 'must' && isDeadlineExtension(event) && inPeriod(event.changedAt, targetPeriod));
     const eventsByTask = new Map<string, DeadlineEvent[]>();
     periodEvents.forEach((event) => eventsByTask.set(event.taskId, [...(eventsByTask.get(event.taskId) ?? []), event]));
     const changed = mustTasks.filter((task) => eventsByTask.has(task.id));
@@ -432,8 +455,8 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       return date && +date >= +bucket.start && +date < +bucket.end;
     });
     const groups = loadMode === 'factions'
-      ? TONES.map((tone) => ({ id: tone, label: `${TONE_META[tone].signal} / ${TONE_META[tone].label}`, tasks: bucketTasks.filter((task) => task.tone === tone) }))
-      : PRIORITIES.map((priority) => ({ id: priority, label: `${PRIORITY_META[priority].label} PRIORITY`, tasks: bucketTasks.filter((task) => task.priority === priority) }));
+      ? TONES.map((tone) => ({ id: tone, label: `${TONE_META[tone].signal} / ${TONE_META[tone].label}`, tone, tasks: bucketTasks.filter((task) => task.tone === tone) }))
+      : PRIORITIES.map((priority) => ({ id: priority, label: `${PRIORITY_META[priority].label} PRIORITY`, tone: PRIORITY_DRILLDOWN_TONE[priority], tasks: bucketTasks.filter((task) => task.priority === priority) }));
     setDrilldown({
       index: '03',
       title: loadMode === 'factions' ? 'FACTION DEPLOYMENT' : 'PRIORITY DEPLOYMENT',
@@ -442,7 +465,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       metricLabel: 'MISSIONS IN BUCKET',
       formula: loadMode === 'factions' ? 'TOTAL = DEPTH + DUTY + LIFE + REST' : 'TOTAL = MUST + HIGH + MID + LOW',
       accent: 'blue',
-      groups: groups.map((group) => ({ id: group.id, label: group.label, countLabel: `${group.tasks.length} MISSIONS`, items: group.tasks.map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
+      groups: groups.map((group) => ({ id: group.id, label: group.label, countLabel: `${group.tasks.length} MISSIONS`, tone: group.tone, items: group.tasks.map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
     });
   };
   const openAllocationDrilldown = (kind: 'tone' | 'type', id: string) => {

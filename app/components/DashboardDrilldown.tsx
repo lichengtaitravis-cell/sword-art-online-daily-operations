@@ -17,6 +17,7 @@ export type DrilldownGroup = {
   id: string;
   label: string;
   countLabel: string;
+  tone?: DrilldownTone;
   items: DrilldownItem[];
 };
 
@@ -70,7 +71,7 @@ export function DashboardDrilldown({ data, onClose }: { data: DashboardDrilldown
       </header>
       <div className="drilldown-formula"><span>COMBAT FORMULA</span><strong>{data.formula}</strong></div>
       <div className="drilldown-groups">
-        {data.groups.map((group, groupIndex) => <section key={group.id} className="drilldown-group">
+        {data.groups.map((group, groupIndex) => <section key={group.id} className={`drilldown-group tone-${group.tone ?? 'muted'}`}>
           <header><span>{String(groupIndex + 1).padStart(2, '0')}</span><strong>{group.label}</strong><small>{group.countLabel}</small></header>
           <div>{group.items.length ? group.items.map((item) => <article key={item.id} className={`drilldown-item tone-${item.tone ?? 'muted'}`}>
             <i aria-hidden="true" />
