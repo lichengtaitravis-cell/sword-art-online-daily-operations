@@ -28,7 +28,7 @@ export type DashboardDrilldownData = {
   metric: string;
   metricLabel: string;
   formula: string;
-  accent: 'yellow' | 'orange' | 'blue' | 'purple';
+  accent: 'yellow' | 'orange' | 'blue' | 'purple' | 'green';
   groups: DrilldownGroup[];
 };
 

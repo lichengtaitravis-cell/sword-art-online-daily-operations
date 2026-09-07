@@ -510,7 +510,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       metric: `${ratio.toFixed(1)}%`,
       metricLabel: `${formatDuration(selectedMinutes)} OF ${formatDuration(totalMinutes)}`,
       formula: `${formatDuration(selectedMinutes)} ${useMergedToneTime ? 'MERGED' : 'SELECTED'} TIME ÷ ${formatDuration(totalMinutes)} TOTAL TIME`,
-      accent: kind === 'tone' ? 'purple' : 'blue',
+      accent: kind === 'tone' ? tone : 'blue',
       groups: [{ id: 'contributors', label: 'CONTRIBUTING MISSIONS / 耗时来源', countLabel: `${matching.length} MISSIONS`, items: matching.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期计入 ${formatDuration(minutes)} · START ${formatMoment(task.startedAt)} · END ${task.status === 'completed' ? formatMoment(task.completedAt) : 'NOW'}`)) }],
     });
   };
@@ -596,7 +596,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       </section>
 
       <section className="time-rank-panel">
-        <header><div><span>06 / PERFORMANCE SCAN</span><h3>TIME INTELLIGENCE</h3></div><div className="type-rank-mode" role="group" aria-label="选择任务类型排名依据"><button type="button" aria-pressed={typeRankMode === 'total'} onClick={() => setTypeRankMode('total')}>TOTAL 排名</button><button type="button" aria-pressed={typeRankMode === 'average'} onClick={() => setTypeRankMode('average')}>AVG 排名</button></div></header>
+        <header><div><span>06 / PERFORMANCE SCAN</span></div><div className="type-rank-mode" role="group" aria-label="选择任务类型排名依据"><button type="button" aria-pressed={typeRankMode === 'total'} onClick={() => setTypeRankMode('total')}>TOTAL 排名</button><button type="button" aria-pressed={typeRankMode === 'average'} onClick={() => setTypeRankMode('average')}>AVG 排名</button></div></header>
         <div className="color-time-roster">{metrics.tones.map((tone) => <article key={tone.tone} className={`tone-${tone.tone} is-actionable`} role="button" tabIndex={0} aria-label={`${TONE_META[tone.tone].label}耗时明细`} onClick={() => openAllocationDrilldown('tone', tone.tone)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAllocationDrilldown('tone', tone.tone); } }}><i /><div><span>{TONE_META[tone.tone].signal}</span><strong>{TONE_META[tone.tone].label}</strong></div><dl><div><dt>TOTAL</dt><dd>{formatDuration(tone.minutes)}</dd></div><div><dt>AVG / TASK</dt><dd>{formatDuration(tone.average)}</dd></div><div><dt>TASKS</dt><dd>{tone.count}</dd></div></dl></article>)}</div>
         <div className="type-rank-head"><span>RANK / TYPE</span><span>{typeRankMode === 'total' ? 'TOTAL SCALE' : 'AVG SCALE'}</span><span>TOTAL</span><span>AVG</span><span>SHARE</span></div>
         <div className="type-rank-list">{rankedTypes.map((type, index) => {

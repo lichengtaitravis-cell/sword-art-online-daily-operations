@@ -397,6 +397,7 @@
 .dashboard-drilldown.drilldown-orange { --drilldown-accent: var(--dashboard-orange); }
 .dashboard-drilldown.drilldown-blue { --drilldown-accent: var(--dashboard-blue); }
 .dashboard-drilldown.drilldown-purple { --drilldown-accent: var(--dashboard-purple); }
+.dashboard-drilldown.drilldown-green { --drilldown-accent: var(--dashboard-green); }
 .dashboard-drilldown::before { content: 'TACTICAL EVIDENCE //'; position: absolute; z-index: 2; right: 76px; top: 8px; color: rgb(255 255 255 / 17%); font-size: .6rem; font-weight: 1000; letter-spacing: .13em; transform: rotate(2deg); pointer-events: none; }
 .dashboard-drilldown > header { display: grid; grid-template-columns: minmax(0, 1fr) auto 48px; align-items: stretch; min-height: 112px; color: var(--color-paper); background: var(--color-ink); border-bottom: 7px solid var(--drilldown-accent); }
 .dashboard-drilldown > header > div:first-child { min-width: 0; padding: 17px 22px 14px; }
