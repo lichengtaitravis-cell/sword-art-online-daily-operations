@@ -17,8 +17,11 @@ The API accepts requests only from HTTP origins on `localhost` or `127.0.0.1`. I
 - `planner_settings`: the current task-type, location, and default-selection configuration.
 - `app_meta`: database initialization, theme, revision, and update timestamp.
 - `migration_backups`: immutable JSON snapshots captured during an explicit browser-storage import.
+- `deadline_events`: immutable audit events captured when an existing deadline on a Must task is changed or cleared. Initial deadline assignment is not a change.
 
 Writes replace the complete planner state inside one `BEGIN IMMEDIATE` transaction. A monotonically increasing revision rejects stale writes from another tab. WAL mode and `synchronous = FULL` are enabled for local durability.
+
+Deadline events are detected inside that same transaction by comparing the previously stored task with the incoming task. Historical changes made before this pipeline existed cannot be reconstructed and are intentionally not backfilled.
 
 ## One-time browser migration
 

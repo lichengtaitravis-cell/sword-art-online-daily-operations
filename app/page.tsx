@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BrandLockup } from './components/BrandLockup';
-import { LifeDashboard, type DashboardTask } from './components/LifeDashboard';
+import { LifeDashboard, type DashboardCampaignScale, type DashboardTask } from './components/LifeDashboard';
+import { loadDeadlineEvents, type DeadlineEvent } from './lib/deadline-store';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
 
@@ -85,6 +86,8 @@ const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
 const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
 const PENDING_SORT_SESSION_KEY = 'sao-planner-pending-sort-v1';
 const BOARD_DENSITY_SESSION_KEY = 'sao-planner-board-density-v1';
+const DASHBOARD_SCALE_SESSION_KEY = 'sao-dashboard-campaign-scale-v1';
+const DASHBOARD_PERIOD_SESSION_KEY = 'sao-dashboard-campaign-period-v1';
 const SLEEP_STANDARD_LIMIT = 9;
 const VISIBLE_LIMIT: Record<BoardDensity, Record<Status, number>> = {
   standard: { pending: 5, inProgress: 5, completed: 5 },
@@ -1139,6 +1142,8 @@ export default function Home() {
   const scheduleTimelineRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>('dashboard');
   const [viewRestored, setViewRestored] = useState(false);
+  const [dashboardScale, setDashboardScale] = useState<DashboardCampaignScale>('week');
+  const [dashboardPeriodId, setDashboardPeriodId] = useState('');
   const [dialogStateRestored, setDialogStateRestored] = useState(false);
   const [introVisible, setIntroVisible] = useState(false);
   const [introMinimumMet, setIntroMinimumMet] = useState(false);
@@ -1185,6 +1190,7 @@ export default function Home() {
   const [customLocation, setCustomLocation] = useState('');
   const [selectedWorkshopLocation, setSelectedWorkshopLocation] = useState('');
   const [sleepRecords, setSleepRecords] = useState<SleepRecord[]>([]);
+  const [deadlineEvents, setDeadlineEvents] = useState<DeadlineEvent[]>([]);
   const [sleepLoading, setSleepLoading] = useState(true);
   const [sleepSubmitting, setSleepSubmitting] = useState(false);
   const [sleepStartedAt, setSleepStartedAt] = useState(() => localDateTimeInputValue(new Date(Date.now() - 8 * 60 * 60_000).toISOString()));
@@ -1202,6 +1208,9 @@ export default function Home() {
   useEffect(() => {
     const savedView = window.sessionStorage.getItem(VIEW_SESSION_KEY);
     const restoredView = navItems.some((item) => item.id === savedView) ? savedView as View : navItems[0].id;
+    const savedDashboardScale = window.sessionStorage.getItem(DASHBOARD_SCALE_SESSION_KEY);
+    const restoredDashboardScale: DashboardCampaignScale = savedDashboardScale === 'month' || savedDashboardScale === 'quarter' ? savedDashboardScale : 'week';
+    const restoredDashboardPeriodId = window.sessionStorage.getItem(DASHBOARD_PERIOD_SESSION_KEY) ?? '';
     const savedDialogState = window.sessionStorage.getItem(DIALOG_SESSION_KEY);
     let restoredDialogState: Partial<DialogSessionState> = {};
     try {
@@ -1222,6 +1231,8 @@ export default function Home() {
     const timers = [window.setTimeout(() => {
       setView(restoredView);
       setViewRestored(true);
+      setDashboardScale(restoredDashboardScale);
+      setDashboardPeriodId(restoredDashboardPeriodId);
       setMenuOpen(restoredDialogState.menuOpen === true);
       setDayAgendaOpen(restoredDialogState.dayAgendaOpen === true);
       if (typeof restoredDialogState.selectedDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(restoredDialogState.selectedDay)) setSelectedDay(restoredDialogState.selectedDay);
@@ -1261,6 +1272,12 @@ export default function Home() {
     if (!viewRestored) return;
     window.sessionStorage.setItem(BOARD_DENSITY_SESSION_KEY, boardDensity);
   }, [boardDensity, viewRestored]);
+
+  useEffect(() => {
+    if (!viewRestored) return;
+    window.sessionStorage.setItem(DASHBOARD_SCALE_SESSION_KEY, dashboardScale);
+    window.sessionStorage.setItem(DASHBOARD_PERIOD_SESSION_KEY, dashboardPeriodId);
+  }, [dashboardPeriodId, dashboardScale, viewRestored]);
 
   useEffect(() => {
     if (!dialogStateRestored) return;
@@ -1357,6 +1374,16 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadDeadlineEvents().then((events) => {
+      if (!cancelled) setDeadlineEvents(events);
+    }).catch(() => {
+      if (!cancelled) setDeadlineEvents([]);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
     const snapshot = JSON.stringify({ tasks, settings, theme });
     if (snapshot === lastPersistedSnapshot.current) return;
@@ -1381,6 +1408,7 @@ export default function Home() {
             return;
           }
           lastPersistedSnapshot.current = snapshot;
+          void loadDeadlineEvents().then(setDeadlineEvents).catch(() => undefined);
         } catch {
           setToast('DATABASE OFFLINE · 修改尚未保存，正在等待重试');
           window.setTimeout(() => setSaveRetry((current) => current + 1), 1_500);
@@ -1775,6 +1803,7 @@ export default function Home() {
     title: task.title,
     status: task.status,
     taskType: task.taskType,
+    priority: task.priority,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     dueAt: task.dueAt,
@@ -1866,6 +1895,13 @@ export default function Home() {
       now={now}
       tasks={dashboardTasks}
       sleepRecords={sleepRecords}
+      deadlineEvents={deadlineEvents}
+      campaignScale={dashboardScale}
+      selectedPeriodId={dashboardPeriodId}
+      onCampaignWindowChange={(nextScale, nextPeriodId) => {
+        setDashboardScale(nextScale);
+        setDashboardPeriodId(nextPeriodId);
+      }}
       onNavigate={(nextView) => navigateTo(nextView)}
     />}
 

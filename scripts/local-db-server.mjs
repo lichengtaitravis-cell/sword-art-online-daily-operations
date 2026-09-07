@@ -62,6 +62,15 @@ db.exec(`
     CHECK (wake_at > sleep_started_at)
   );
 
+  CREATE TABLE IF NOT EXISTS deadline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    old_due_at TEXT NOT NULL,
+    new_due_at TEXT NOT NULL,
+    priority_at_change TEXT NOT NULL CHECK (priority_at_change IN ('must', 'high', 'medium', 'low'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tasks_status_manual_order
   ON tasks(status, manual_order);
 
@@ -71,6 +80,9 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_sleep_records_wake_at
   ON sleep_records(wake_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_deadline_events_task_changed_at
+  ON deadline_events(task_id, changed_at DESC);
 `);
 db.exec('PRAGMA optimize');
 
@@ -102,6 +114,15 @@ const insertSleepRecord = db.prepare(`
   VALUES (?, ?, ?, ?, ?)
 `);
 const deleteSleepRecord = db.prepare('DELETE FROM sleep_records WHERE id = ?');
+const readDeadlineEvents = db.prepare(`
+  SELECT id, task_id, changed_at, old_due_at, new_due_at, priority_at_change
+  FROM deadline_events
+  ORDER BY changed_at DESC, id DESC
+`);
+const insertDeadlineEvent = db.prepare(`
+  INSERT INTO deadline_events (task_id, changed_at, old_due_at, new_due_at, priority_at_change)
+  VALUES (?, ?, ?, ?, ?)
+`);
 
 function getMeta(key, fallback) {
   return readMeta.get(key)?.value ?? fallback;
@@ -145,6 +166,11 @@ function saveState(payload) {
   }
 
   const now = new Date().toISOString();
+  const wasInitialized = getMeta('initialized', 'false') === 'true';
+  const previousTasks = new Map(readTasks.all().map((row) => {
+    const task = JSON.parse(row.payload_json);
+    return [task.id, task];
+  }));
   db.exec('BEGIN IMMEDIATE');
   try {
     if (payload.migrationSource) {
@@ -153,6 +179,17 @@ function saveState(payload) {
         settings: payload.settings,
         theme: payload.theme,
       }), now);
+    }
+
+    if (wasInitialized) {
+      for (const task of payload.tasks) {
+        const previous = previousTasks.get(task.id);
+        const oldDueAt = String(previous?.dueAt ?? '');
+        const newDueAt = String(task.dueAt ?? '');
+        if (previous && !task.isRecurrenceTemplate && (previous.priority === 'must' || task.priority === 'must') && oldDueAt && oldDueAt !== newDueAt) {
+          insertDeadlineEvent.run(task.id, now, oldDueAt, newDueAt, task.priority);
+        }
+      }
     }
 
     deleteTasks.run();
@@ -198,6 +235,17 @@ function getSleepRecords() {
     wakeAt: record.wake_at,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
+  }));
+}
+
+function getDeadlineEvents() {
+  return readDeadlineEvents.all().map((event) => ({
+    id: Number(event.id),
+    taskId: event.task_id,
+    changedAt: event.changed_at,
+    oldDueAt: event.old_due_at,
+    newDueAt: event.new_due_at,
+    priorityAtChange: event.priority_at_change,
   }));
 }
 
@@ -260,6 +308,9 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/sleep-records') {
       return sendJson(response, 200, getSleepRecords(), origin);
+    }
+    if (request.method === 'GET' && request.url === '/v1/deadline-events') {
+      return sendJson(response, 200, getDeadlineEvents(), origin);
     }
     if (request.method === 'POST' && request.url === '/v1/sleep-records') {
       return sendJson(response, 201, createSleepRecord(await readJson(request)), origin);
