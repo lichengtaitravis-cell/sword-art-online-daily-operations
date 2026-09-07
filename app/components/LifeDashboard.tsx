@@ -506,7 +506,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
 
   return <section className="life-dashboard" aria-label="长期生活战绩 Dashboard">
     <header className="campaign-header">
-      <div className="campaign-title"><span>00 / LIFE PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong> · 黄金战役编年史</p></div>
+      <div className="campaign-title"><span>00 / LIFE PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong><span aria-hidden="true">·</span><span className="campaign-brand-status">Sword Art Online <i aria-label="系统在线"><b aria-hidden="true" />LINK ACTIVE</i></span></p></div>
       <div className="campaign-scale" role="group" aria-label="选择战役时间维度">{(Object.entries(SCALE_META) as [DashboardCampaignScale, typeof SCALE_META[DashboardCampaignScale]][]).map(([key, meta]) => <button type="button" key={key} className={`campaign-scale-${key}`} aria-pressed={scale === key} onClick={() => selectScale(key)}><strong>{meta.title}</strong><span>{meta.subtitle}</span></button>)}</div>
       <div className="period-selector" ref={periodSelectorRef}>
         <span>SELECT CAMPAIGN / 选择战役</span>
