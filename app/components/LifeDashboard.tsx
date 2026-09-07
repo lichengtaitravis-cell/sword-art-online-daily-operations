@@ -1,19 +1,17 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import type { SleepRecord } from '../lib/sleep-store';
 
 type DashboardStatus = 'pending' | 'inProgress' | 'completed';
 type DashboardTone = 'purple' | 'blue' | 'green' | 'yellow';
+type CampaignRange = 'week' | 'month' | 'quarter';
 
 export type DashboardTask = {
   id: string;
   title: string;
-  description: string;
   status: DashboardStatus;
   taskType: string;
-  priority: 'must' | 'high' | 'medium' | 'low';
-  location: string;
   startedAt: string;
   completedAt: string;
   dueAt: string;
@@ -24,20 +22,32 @@ type LifeDashboardProps = {
   username: string;
   now: Date;
   tasks: DashboardTask[];
-  todayTasks: DashboardTask[];
   sleepRecords: SleepRecord[];
-  onOpenTask: (id: string) => void;
-  onStartTask: (id: string) => void;
-  onNewTask: () => void;
   onNavigate: (view: 'board' | 'table' | 'calendar' | 'sleep') => void;
+};
+
+type TimeBucket = {
+  key: string;
+  label: string;
+  clears: number;
+  tones: Record<DashboardTone, number>;
+  total: number;
 };
 
 const DAY_MS = 24 * 60 * 60_000;
 const MINUTE_MS = 60_000;
-
-function dayKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
+const TONES: DashboardTone[] = ['purple', 'blue', 'green', 'yellow'];
+const RANGE_META: Record<CampaignRange, { days: number; buckets: number; title: string; subtitle: string }> = {
+  week: { days: 7, buckets: 7, title: '7D', subtitle: '周战役' },
+  month: { days: 30, buckets: 6, title: '30D', subtitle: '月战役' },
+  quarter: { days: 90, buckets: 9, title: '90D', subtitle: '季度战役' },
+};
+const TONE_META: Record<DashboardTone, { label: string; signal: string }> = {
+  purple: { label: '成长阵营', signal: 'GROWTH' },
+  blue: { label: '事务阵营', signal: 'TACTICS' },
+  green: { label: '生活阵营', signal: 'LIFE' },
+  yellow: { label: '恢复阵营', signal: 'RECOVERY' },
+};
 
 function validDate(value: string) {
   if (!value) return null;
@@ -45,14 +55,16 @@ function validDate(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function durationWithinDay(task: DashboardTask, day: Date, now: Date) {
-  const start = validDate(task.startedAt);
-  if (!start || task.status === 'pending') return 0;
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function intervalMinutes(task: DashboardTask, start: Date, end: Date, now: Date) {
+  const taskStart = validDate(task.startedAt);
+  if (!taskStart || task.status === 'pending') return 0;
   const rawEnd = task.status === 'completed' ? validDate(task.completedAt) : now;
   if (!rawEnd) return 0;
-  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
-  const dayEnd = new Date(+dayStart + DAY_MS);
-  return Math.max(0, Math.min(+rawEnd, +dayEnd) - Math.max(+start, +dayStart)) / MINUTE_MS;
+  return Math.max(0, Math.min(+rawEnd, +end) - Math.max(+taskStart, +start)) / MINUTE_MS;
 }
 
 function formatDuration(minutes: number) {
@@ -60,163 +72,169 @@ function formatDuration(minutes: number) {
   const rounded = Math.round(minutes);
   const hours = Math.floor(rounded / 60);
   const rest = rounded % 60;
-  return hours ? `${hours}h ${rest ? `${rest}m` : ''}`.trim() : `${rest}m`;
+  return hours ? `${hours}h${rest ? ` ${rest}m` : ''}` : `${rest}m`;
 }
 
-function formatClock(value: string) {
+function inRange(value: string, start: Date, end: Date) {
   const date = validDate(value);
-  return date ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date) : '--:--';
+  return Boolean(date && +date >= +start && +date < +end);
 }
 
-function priorityRank(priority: DashboardTask['priority']) {
-  return { must: 0, high: 1, medium: 2, low: 3 }[priority];
-}
-
-function nextTask(tasks: DashboardTask[], now: Date) {
-  const active = tasks.filter((task) => task.status === 'inProgress')
-    .sort((a, b) => +(validDate(b.startedAt) ?? 0) - +(validDate(a.startedAt) ?? 0));
-  if (active[0]) return active[0];
-  return tasks.filter((task) => task.status === 'pending').sort((a, b) => {
-    const aTime = validDate(a.startedAt) ?? validDate(a.dueAt);
-    const bTime = validDate(b.startedAt) ?? validDate(b.dueAt);
-    const aFuture = aTime && +aTime >= +now ? +aTime : Number.MAX_SAFE_INTEGER;
-    const bFuture = bTime && +bTime >= +now ? +bTime : Number.MAX_SAFE_INTEGER;
-    return aFuture - bFuture || priorityRank(a.priority) - priorityRank(b.priority);
-  })[0] ?? null;
-}
-
-function taskSignalTime(task: DashboardTask) {
-  return validDate(task.startedAt) ?? validDate(task.dueAt) ?? validDate(task.completedAt);
-}
-
-export function LifeDashboard({ username, now, tasks, todayTasks, sleepRecords, onOpenTask, onStartTask, onNewTask, onNavigate }: LifeDashboardProps) {
-  const completed = todayTasks.filter((task) => task.status === 'completed');
-  const active = todayTasks.filter((task) => task.status === 'inProgress');
-  const pending = todayTasks.filter((task) => task.status === 'pending');
-  const completionRate = todayTasks.length ? Math.round(completed.length / todayTasks.length * 100) : 0;
-  const trackedMinutes = todayTasks.reduce((total, task) => total + durationWithinDay(task, now, now), 0);
-  const focus = nextTask(todayTasks, now);
-  const latestSleep = sleepRecords[0] ?? null;
-  const latestSleepMinutes = latestSleep ? (+new Date(latestSleep.wakeAt) - +new Date(latestSleep.sleepStartedAt)) / MINUTE_MS : 0;
-
-  const categoryTotals = new Map<string, { label: string; minutes: number; tone: DashboardTone }>();
-  todayTasks.forEach((task) => {
-    const minutes = durationWithinDay(task, now, now);
-    if (!minutes) return;
-    const current = categoryTotals.get(task.taskType) ?? { label: task.taskType, minutes: 0, tone: task.tone };
-    current.minutes += minutes;
-    categoryTotals.set(task.taskType, current);
+function buildBuckets(tasks: DashboardTask[], rangeStart: Date, rangeEnd: Date, count: number, now: Date): TimeBucket[] {
+  const span = +rangeEnd - +rangeStart;
+  return Array.from({ length: count }, (_, index) => {
+    const start = new Date(+rangeStart + span * index / count);
+    const end = new Date(+rangeStart + span * (index + 1) / count);
+    const tones = { purple: 0, blue: 0, green: 0, yellow: 0 } satisfies Record<DashboardTone, number>;
+    tasks.forEach((task) => { tones[task.tone] += intervalMinutes(task, start, end, now); });
+    const clears = tasks.filter((task) => inRange(task.completedAt, start, end)).length;
+    const label = count === 7
+      ? new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(start).toUpperCase()
+      : `${start.getMonth() + 1}/${start.getDate()}`;
+    return { key: start.toISOString(), label, clears, tones, total: TONES.reduce((sum, tone) => sum + tones[tone], 0) };
   });
-  const categories = [...categoryTotals.values()].sort((a, b) => b.minutes - a.minutes).slice(0, 4);
-  const maxCategoryMinutes = Math.max(1, ...categories.map((category) => category.minutes));
+}
 
-  const lastSevenDays = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - index));
-    const key = dayKey(date);
-    const cleared = tasks.filter((task) => task.completedAt && dayKey(new Date(task.completedAt)) === key);
+function sleepAverage(records: SleepRecord[], start: Date, end: Date) {
+  const matching = records.filter((record) => inRange(record.wakeAt, start, end));
+  if (!matching.length) return { minutes: 0, count: 0 };
+  return {
+    minutes: matching.reduce((sum, record) => sum + Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS, 0) / matching.length,
+    count: matching.length,
+  };
+}
+
+export function LifeDashboard({ username, now, tasks, sleepRecords, onNavigate }: LifeDashboardProps) {
+  const [range, setRange] = useState<CampaignRange>('month');
+  const data = useMemo(() => {
+    const meta = RANGE_META[range];
+    const rangeEnd = new Date(+now + 1_000);
+    const rangeStart = startOfDay(new Date(+now - (meta.days - 1) * DAY_MS));
+    const trackedTasks = tasks.filter((task) => intervalMinutes(task, rangeStart, rangeEnd, now) > 0);
+    const clearedTasks = tasks.filter((task) => inRange(task.completedAt, rangeStart, rangeEnd));
+    const scopedTasks = tasks.filter((task) => trackedTasks.includes(task) || inRange(task.startedAt, rangeStart, rangeEnd) || inRange(task.dueAt, rangeStart, rangeEnd) || inRange(task.completedAt, rangeStart, rangeEnd));
+    const buckets = buildBuckets(tasks, rangeStart, rangeEnd, meta.buckets, now);
+    const toneMinutes = { purple: 0, blue: 0, green: 0, yellow: 0 } satisfies Record<DashboardTone, number>;
+    const typeMinutes = new Map<string, { label: string; tone: DashboardTone; minutes: number }>();
+    trackedTasks.forEach((task) => {
+      const minutes = intervalMinutes(task, rangeStart, rangeEnd, now);
+      toneMinutes[task.tone] += minutes;
+      const type = typeMinutes.get(task.taskType) ?? { label: task.taskType, tone: task.tone, minutes: 0 };
+      type.minutes += minutes;
+      typeMinutes.set(task.taskType, type);
+    });
+    const totalMinutes = TONES.reduce((sum, tone) => sum + toneMinutes[tone], 0);
+    const activeDates = new Set<string>();
+    trackedTasks.forEach((task) => {
+      const taskStart = validDate(task.startedAt);
+      const taskEnd = task.status === 'completed' ? validDate(task.completedAt) : now;
+      if (!taskStart || !taskEnd) return;
+      let cursor = startOfDay(new Date(Math.max(+taskStart, +rangeStart)));
+      const finalDay = startOfDay(new Date(Math.min(+taskEnd, +rangeEnd)));
+      while (+cursor <= +finalDay) {
+        activeDates.add(cursor.toISOString());
+        cursor = new Date(+cursor + DAY_MS);
+      }
+    });
     return {
-      key,
-      date,
-      count: cleared.length,
-      minutes: cleared.reduce((total, task) => total + durationWithinDay(task, date, now), 0),
+      meta,
+      rangeStart,
+      buckets,
+      toneMinutes,
+      totalMinutes,
+      activeDays: Math.min(meta.days, activeDates.size),
+      clearCount: clearedTasks.length,
+      completionRate: scopedTasks.length ? Math.round(clearedTasks.length / scopedTasks.length * 100) : 0,
+      types: [...typeMinutes.values()].sort((a, b) => b.minutes - a.minutes),
+      sleep: sleepAverage(sleepRecords, rangeStart, rangeEnd),
     };
-  });
-  const maxDailyCount = Math.max(1, ...lastSevenDays.map((day) => day.count));
-  const totalSevenDayClears = lastSevenDays.reduce((total, day) => total + day.count, 0);
+  }, [now, range, sleepRecords, tasks]);
 
-  const agenda = [...todayTasks].sort((a, b) => +(taskSignalTime(a) ?? Number.MAX_SAFE_INTEGER) - +(taskSignalTime(b) ?? Number.MAX_SAFE_INTEGER)).slice(0, 5);
-  const hour = now.getHours();
-  const phase = hour < 6 ? 'MIDNIGHT CHANNEL' : hour < 12 ? 'MORNING PHASE' : hour < 18 ? 'DAYLIGHT PHASE' : 'EVENING PHASE';
+  const maxBucketMinutes = Math.max(1, ...data.buckets.map((bucket) => bucket.total));
+  const maxTypeMinutes = Math.max(1, ...data.types.map((type) => type.minutes));
+  const maxClears = Math.max(1, ...data.buckets.map((bucket) => bucket.clears));
+  const trendCoordinates = data.buckets.map((bucket, index) => ({
+    x: data.buckets.length === 1 ? 300 : 24 + index * 552 / (data.buckets.length - 1),
+    y: 134 - bucket.clears / maxClears * 104,
+  }));
+  const trendPoints = trendCoordinates.map((point) => `${point.x},${point.y}`).join(' ');
+  let donutCursor = 0;
+  const donutSegments = data.totalMinutes ? TONES.map((tone) => {
+    const start = donutCursor;
+    donutCursor += data.toneMinutes[tone] / data.totalMinutes * 100;
+    return `var(--dashboard-${tone}) ${start}% ${donutCursor}%`;
+  }).join(',') : 'rgba(17,18,15,.16) 0 100%';
+  const periodLabel = `${new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(data.rangeStart)} — ${new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(now)}`;
 
-  return <section className="life-dashboard" aria-label="生活监控 Dashboard">
-    <header className="dashboard-command">
-      <div className="dashboard-command-copy">
-        <span>00 / HOME SIGNAL · {phase}</span>
-        <h2>LIFE<br /><em>COMMAND</em></h2>
-        <p><strong>{username}</strong>，今天的行动信号已接通。</p>
+  return <section className="life-dashboard" aria-label="长期生活战绩 Dashboard">
+    <header className="campaign-header">
+      <div className="campaign-title"><span>00 / PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong> · 跨周期生活战绩监控</p></div>
+      <div className="campaign-range" role="group" aria-label="选择分析时间范围">
+        {(Object.entries(RANGE_META) as [CampaignRange, typeof RANGE_META[CampaignRange]][]).map(([key, meta]) => <button type="button" key={key} aria-pressed={range === key} onClick={() => setRange(key)}><strong>{meta.title}</strong><span>{meta.subtitle}</span></button>)}
       </div>
-      <div className="dashboard-clock" aria-label="当前时间">
-        <time>{new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now)}</time>
-        <span>{new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(now)}</span>
-        <i aria-hidden="true" />
-      </div>
-      <div className="dashboard-score">
-        <span>TODAY&apos;S SYNC</span>
-        <strong>{completionRate}<small>%</small></strong>
-        <div><i style={{ width: `${completionRate}%` }} /></div>
-        <p>{completed.length} CLEAR · {active.length} ACTIVE · {pending.length} WAITING</p>
-      </div>
+      <div className="campaign-period"><span>OBSERVATION WINDOW</span><strong>{periodLabel}</strong><small>{data.meta.days} DAYS OF BATTLE DATA</small></div>
     </header>
 
-    <div className="dashboard-grid">
-      <section className="dashboard-focus-panel">
-        <header><span>▶ CURRENT OBJECTIVE</span><strong>当前战况</strong></header>
-        {focus ? <div className={`dashboard-focus-card tone-${focus.tone}`}>
-          <div className="dashboard-focus-status"><span>{focus.status === 'inProgress' ? 'IN BATTLE' : 'NEXT MISSION'}</span><i>{focus.status === 'inProgress' ? 'LIVE' : focus.priority.toUpperCase()}</i></div>
-          <h3>{focus.title}</h3>
-          <p>{focus.description || `${focus.taskType} · ${focus.location}`}</p>
-          <dl>
-            <div><dt>START</dt><dd>{formatClock(focus.startedAt)}</dd></div>
-            <div><dt>DEADLINE</dt><dd>{formatClock(focus.dueAt)}</dd></div>
-            <div><dt>TYPE</dt><dd>{focus.taskType}</dd></div>
-          </dl>
-          <div className="dashboard-focus-actions">
-            {focus.status === 'pending' && <button type="button" onClick={() => onStartTask(focus.id)}>▶ MISSION START</button>}
-            <button type="button" onClick={() => onOpenTask(focus.id)}>OPEN DATA <span>›</span></button>
-          </div>
-        </div> : <button type="button" className="dashboard-free-state" onClick={onNewTask}><strong>FREE TIME!</strong><span>今日没有待处理任务 · 创建新的行动</span></button>}
-      </section>
+    <section className="campaign-scoreboard" aria-live="polite">
+      <article><span>TRACKED TIME</span><strong>{formatDuration(data.totalMinutes)}</strong><small>区间内行动耗时</small></article>
+      <article><span>MISSION CLEAR</span><strong>{data.clearCount}</strong><small>区间内完成任务</small></article>
+      <article><span>CLEAR RATE</span><strong>{data.completionRate}<i>%</i></strong><small>有时间信号任务完成率</small></article>
+      <article><span>ACTIVE DAYS</span><strong>{data.activeDays}<i>/{data.meta.days}</i></strong><small>产生行动记录的天数</small></article>
+      <article><span>REST AVG</span><strong>{data.sleep.count ? formatDuration(data.sleep.minutes) : '--'}</strong><small>{data.sleep.count ? `${data.sleep.count} 条睡眠记录` : '暂无区间记录'}</small></article>
+    </section>
 
-      <section className="dashboard-stat-panel">
-        <header><span>REAL-TIME READOUT</span><strong>今日读数</strong></header>
-        <div className="dashboard-stat-grid">
-          <article><span>TRACKED TIME</span><strong>{formatDuration(trackedMinutes)}</strong><small>已记录行动耗时</small></article>
-          <article><span>MISSION CLEAR</span><strong>{completed.length}<i>/{todayTasks.length}</i></strong><small>今日完成任务</small></article>
-          <article><span>REST SIGNAL</span><strong>{latestSleep ? formatDuration(latestSleepMinutes) : '--'}</strong><small>{latestSleep ? '最近一次睡眠' : '暂无睡眠记录'}</small></article>
-          <article><span>7D COMBO</span><strong>{totalSevenDayClears}</strong><small>近七日完成总数</small></article>
-        </div>
-      </section>
-
-      <section className="dashboard-allocation-panel">
-        <header><span>TIME DISTRIBUTION</span><strong>时间投入</strong></header>
-        <div className="dashboard-allocation-list">
-          {categories.map((category) => <article key={category.label} className={`tone-${category.tone}`}>
-            <div><strong>{category.label}</strong><span>{formatDuration(category.minutes)}</span></div>
-            <i><b style={{ width: `${category.minutes / maxCategoryMinutes * 100}%` }} /></i>
-          </article>)}
-          {!categories.length && <div className="dashboard-data-empty"><strong>NO TIME SIGNAL</strong><span>开始任务后，投入时间会出现在这里。</span></div>}
-        </div>
-      </section>
-
-      <section className="dashboard-week-panel">
-        <header><span>RESULT ARCHIVE</span><strong>七日战果</strong></header>
-        <div className="dashboard-week-chart" role="img" aria-label={`近七日完成 ${totalSevenDayClears} 个任务`}>
-          {lastSevenDays.map((day) => <div key={day.key} className={day.key === dayKey(now) ? 'is-today' : ''}>
-            <span>{day.count}</span>
-            <i style={{ '--bar-height': `${Math.max(day.count ? 18 : 4, day.count / maxDailyCount * 100)}%` } as CSSProperties}><b /></i>
-            <small>{new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(day.date).toUpperCase()}</small>
+    <div className="campaign-grid">
+      <section className="battle-timeline-panel">
+        <header><div><span>01 / TIME FRONTLINE</span><h3>耗时战线</h3></div><p>每根立体柱代表一个时间分段，颜色显示投入结构。</p></header>
+        <div className="battle-legend">{TONES.map((tone) => <span key={tone} className={`tone-${tone}`}><i />{TONE_META[tone].label}</span>)}</div>
+        <div className="battle-towers" role="img" aria-label={`${data.meta.days} 日不同颜色任务耗时堆叠图`}>
+          {data.buckets.map((bucket) => <div className="battle-tower-unit" key={bucket.key} title={`${bucket.label} · ${formatDuration(bucket.total)} · ${bucket.clears} CLEAR`}>
+            <span>{formatDuration(bucket.total)}</span>
+            <div className="battle-tower" style={{ '--tower-height': `${Math.max(bucket.total ? 12 : 3, bucket.total / maxBucketMinutes * 100)}%` } as CSSProperties}>
+              <div>{TONES.map((tone) => bucket.tones[tone] > 0 && <i key={tone} className={`tone-${tone}`} style={{ height: `${bucket.tones[tone] / bucket.total * 100}%` }} />)}</div>
+            </div>
+            <strong>{bucket.label}</strong><small>{bucket.clears} CLEAR</small>
           </div>)}
         </div>
       </section>
 
-      <section className="dashboard-agenda-panel">
-        <header><span>TODAY&apos;S CHANNEL</span><strong>行动序列</strong><button type="button" onClick={() => onNavigate('board')}>FULL OPS ›</button></header>
-        <div className="dashboard-agenda-list">
-          {agenda.map((task, index) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)} className={`tone-${task.tone}`}>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <time>{formatClock((task.status === 'completed' ? task.completedAt : task.startedAt) || task.dueAt)}</time>
-            <div><strong>{task.title}</strong><small>{task.taskType} · {task.status === 'completed' ? 'CLEAR' : task.status === 'inProgress' ? 'IN BATTLE' : 'STANDBY'}</small></div>
-            <i>›</i>
-          </button>)}
-          {!agenda.length && <div className="dashboard-data-empty"><strong>OPEN CHANNEL</strong><span>今天的行动序列还是空的。</span></div>}
+      <section className="faction-panel">
+        <header><span>02 / COLOR FACTIONS</span><h3>颜色阵营占比</h3></header>
+        <div className="faction-orbit-wrap">
+          <div className="faction-orbit" style={{ '--faction-ring': `conic-gradient(${donutSegments})` } as CSSProperties}><span><strong>{formatDuration(data.totalMinutes)}</strong><small>TOTAL TIME</small></span></div>
+        </div>
+        <div className="faction-list">{TONES.map((tone, index) => {
+          const share = data.totalMinutes ? data.toneMinutes[tone] / data.totalMinutes * 100 : 0;
+          return <article key={tone} className={`tone-${tone}`}><span>0{index + 1}</span><i /><div><strong>{TONE_META[tone].signal}</strong><small>{TONE_META[tone].label}</small></div><b>{share.toFixed(1)}%</b><em>{formatDuration(data.toneMinutes[tone])}</em></article>;
+        })}</div>
+      </section>
+
+      <section className="clear-trend-panel">
+        <header><span>03 / CLEAR VELOCITY</span><h3>完成趋势</h3><strong>{data.clearCount} TOTAL</strong></header>
+        <div className="clear-trend-chart" role="img" aria-label={`${data.meta.days} 日任务完成数量趋势`}>
+          <svg viewBox="0 0 600 165" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="clear-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--color-signal)" stopOpacity=".62" /><stop offset="1" stopColor="var(--color-signal)" stopOpacity=".04" /></linearGradient></defs>
+            <path className="clear-grid" d="M24 30H576M24 82H576M24 134H576" />
+            {data.buckets.length > 1 && <><polygon className="clear-area" points={`24,134 ${trendPoints} 576,134`} /><polyline className="clear-line" points={trendPoints} /></>}
+            {data.buckets.map((bucket, index) => <g key={bucket.key}><circle cx={trendCoordinates[index].x} cy={trendCoordinates[index].y} r="7" /><text x={trendCoordinates[index].x} y={trendCoordinates[index].y - 13}>{bucket.clears}</text></g>)}
+          </svg>
+          <div>{data.buckets.map((bucket) => <span key={bucket.key}>{bucket.label}</span>)}</div>
         </div>
       </section>
 
-      <nav className="dashboard-shortcuts" aria-label="Dashboard 快速入口">
-        <button type="button" onClick={() => onNavigate('board')}><span>01</span><strong>DAILY OPS</strong><small>每日作战计划</small><i>▶</i></button>
-        <button type="button" onClick={() => onNavigate('calendar')}><span>04</span><strong>CALENDAR</strong><small>月度行动地图</small><i>◆</i></button>
-        <button type="button" onClick={() => onNavigate('sleep')}><span>03</span><strong>NIGHT LOG</strong><small>夜间状态档案</small><i>☾</i></button>
-        <button type="button" onClick={() => onNavigate('table')}><span>02</span><strong>ARCHIVE</strong><small>完整任务档案</small><i>▦</i></button>
+      <section className="type-league-panel">
+        <header><div><span>04 / TYPE LEAGUE</span><h3>任务类型耗时排名</h3></div><p>比较具体任务类型，而不只是颜色大类。</p></header>
+        <div className="type-league-list">{data.types.slice(0, 10).map((type, index) => {
+          const share = data.totalMinutes ? type.minutes / data.totalMinutes * 100 : 0;
+          return <article key={type.label} className={`tone-${type.tone}`}><span>{String(index + 1).padStart(2, '0')}</span><strong>{type.label}</strong><div><i style={{ width: `${type.minutes / maxTypeMinutes * 100}%` }} /></div><b>{formatDuration(type.minutes)}</b><em>{share.toFixed(1)}%</em></article>;
+        })}{!data.types.length && <div className="campaign-empty"><strong>NO BATTLE DATA</strong><span>完成或开始任务后，这里会形成任务类型排名。</span></div>}</div>
+      </section>
+
+      <nav className="campaign-shortcuts" aria-label="功能页快捷入口">
+        <button type="button" onClick={() => onNavigate('board')}><span>01</span><div><strong>DAILY OPS</strong><small>回到今天，立即行动</small></div><i>▶</i></button>
+        <button type="button" onClick={() => onNavigate('table')}><span>02</span><div><strong>MISSION ARCHIVE</strong><small>检查完整任务档案</small></div><i>▦</i></button>
+        <button type="button" onClick={() => onNavigate('sleep')}><span>03</span><div><strong>NIGHT LOG</strong><small>查看恢复与睡眠节奏</small></div><i>☾</i></button>
+        <button type="button" onClick={() => onNavigate('calendar')}><span>04</span><div><strong>CALENDAR</strong><small>进入月度行动地图</small></div><i>◆</i></button>
       </nav>
     </div>
   </section>;

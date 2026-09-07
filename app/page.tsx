@@ -1773,17 +1773,13 @@ export default function Home() {
   const dashboardTasks: DashboardTask[] = missionTasks.map((task) => ({
     id: task.id,
     title: task.title,
-    description: descriptionToText(task.description),
     status: task.status,
     taskType: task.taskType,
-    priority: task.priority,
-    location: task.location,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     dueAt: task.dueAt,
     tone: typeColor(task.taskType, settings),
   }));
-  const dashboardTodayTasks = dashboardTasks.filter((task) => todayActionTasks.some((todayTask) => todayTask.id === task.id));
   const completedToday = todayActionTasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
   const selectedDayTasks = missionTasks.filter((task) => taskOccursInActionDay(task, selectedDay, now)).sort((a, b) => +new Date(calendarTaskDate(a, now)) - +new Date(calendarTaskDate(b, now)));
   const dayScheduleBlocks = useMemo(() => layoutDaySchedule(selectedDayTasks, selectedDay, now), [selectedDayTasks, selectedDay, now]);
@@ -1869,11 +1865,7 @@ export default function Home() {
       username={settings.username}
       now={now}
       tasks={dashboardTasks}
-      todayTasks={dashboardTodayTasks}
       sleepRecords={sleepRecords}
-      onOpenTask={(id) => { const task = missionTasks.find((item) => item.id === id); if (task) setDraft(task); }}
-      onStartTask={(id) => moveTask(id, 'inProgress')}
-      onNewTask={() => openNewTask()}
       onNavigate={(nextView) => navigateTo(nextView)}
     />}
 
