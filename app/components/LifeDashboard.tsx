@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { DashboardDrilldown, type DashboardDrilldownData, type DrilldownItem, type DrilldownTone } from './DashboardDrilldown';
 import type { DeadlineEvent } from '../lib/deadline-store';
 import type { SleepRecord } from '../lib/sleep-store';
@@ -11,6 +11,7 @@ type DashboardPriority = 'must' | 'high' | 'medium' | 'low';
 export type DashboardCampaignScale = 'week' | 'month' | 'quarter';
 type TypeRankMode = 'total' | 'average';
 type LoadMode = 'factions' | 'priority';
+type FactionTimeMode = 'merged' | 'stacked';
 
 export type DashboardTask = {
   id: string;
@@ -57,6 +58,7 @@ const MINUTE_MS = 60_000;
 const IN_TIME_GRACE_MS = 60 * MINUTE_MS;
 const PIE_RADIUS = 82;
 const PIE_CIRCUMFERENCE = 2 * Math.PI * PIE_RADIUS;
+const FACTION_TIME_MODE_SESSION_KEY = 'sao-dashboard-faction-time-mode-v1';
 const TONES: DashboardTone[] = ['purple', 'blue', 'green', 'yellow'];
 const PRIORITIES: DashboardPriority[] = ['must', 'high', 'medium', 'low'];
 const TONE_META: Record<DashboardTone, { label: string; signal: string }> = {
@@ -155,12 +157,41 @@ function inPeriod(value: string, period: CampaignPeriod) {
   return Boolean(date && +date >= +period.start && +date < +period.end);
 }
 
-function intervalMinutes(task: DashboardTask, period: CampaignPeriod, now: Date) {
+function trackedInterval(task: DashboardTask, period: CampaignPeriod, now: Date) {
   const taskStart = validDate(task.startedAt);
-  if (!taskStart || task.status === 'pending') return 0;
+  if (!taskStart || task.status === 'pending') return null;
   const rawEnd = task.status === 'completed' ? validDate(task.completedAt) : now;
-  if (!rawEnd) return 0;
-  return Math.max(0, Math.min(+rawEnd, +period.end, +now) - Math.max(+taskStart, +period.start)) / MINUTE_MS;
+  if (!rawEnd) return null;
+  const start = Math.max(+taskStart, +period.start);
+  const end = Math.min(+rawEnd, +period.end, +now);
+  return end > start ? { start, end } : null;
+}
+
+function intervalMinutes(task: DashboardTask, period: CampaignPeriod, now: Date) {
+  const interval = trackedInterval(task, period, now);
+  return interval ? (interval.end - interval.start) / MINUTE_MS : 0;
+}
+
+function mergedToneMinutes(tasks: DashboardTask[], tone: DashboardTone, period: CampaignPeriod, now: Date) {
+  const intervals = tasks
+    .filter((task) => task.tone === tone)
+    .map((task) => trackedInterval(task, period, now))
+    .filter((interval): interval is { start: number; end: number } => Boolean(interval))
+    .sort((a, b) => a.start - b.start);
+  if (!intervals.length) return 0;
+  let total = 0;
+  let mergedStart = intervals[0].start;
+  let mergedEnd = intervals[0].end;
+  intervals.slice(1).forEach((interval) => {
+    if (interval.start <= mergedEnd) {
+      mergedEnd = Math.max(mergedEnd, interval.end);
+      return;
+    }
+    total += mergedEnd - mergedStart;
+    mergedStart = interval.start;
+    mergedEnd = interval.end;
+  });
+  return (total + mergedEnd - mergedStart) / MINUTE_MS;
 }
 
 function taskOperationalDate(task: DashboardTask) {
@@ -234,18 +265,7 @@ function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: D
   });
   const sleeps = sleepRecords.filter((record) => inPeriod(record.wakeAt, period));
   const sleepAverage = sleeps.length ? sleeps.reduce((sum, record) => sum + Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS, 0) / sleeps.length : null;
-  const activeDays = new Set<string>();
-  trackedTasks.forEach((task) => {
-    const taskStart = validDate(task.startedAt);
-    const taskEnd = task.status === 'completed' ? validDate(task.completedAt) : now;
-    if (!taskStart || !taskEnd) return;
-    const cursor = startOfDay(new Date(Math.max(+taskStart, +period.start)));
-    const final = startOfDay(new Date(Math.min(+taskEnd, +period.end - 1, +now)));
-    while (+cursor <= +final) {
-      activeDays.add(dateKey(cursor));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-  });
+  const activeDays = new Set(sleeps.map((record) => dateKey(new Date(record.wakeAt))));
   return {
     taskCount: periodTasks.length,
     mustCount: mustTasks.length,
@@ -291,10 +311,11 @@ function buildLoadBuckets(period: CampaignPeriod, scale: DashboardCampaignScale,
   return buckets;
 }
 
-function PieChart({ title, subtitle, segments, onSegmentSelect }: {
+function PieChart({ title, subtitle, segments, headingControl, onSegmentSelect }: {
   title: string;
   subtitle: string;
   segments: { id: string; label: string; value: number; color: string }[];
+  headingControl?: ReactNode;
   onSegmentSelect: (segment: { id: string; label: string; value: number; color: string }) => void;
 }) {
   const [hoveredSegment, setHoveredSegment] = useState<{ label: string; ratio: number; value: number } | null>(null);
@@ -302,7 +323,7 @@ function PieChart({ title, subtitle, segments, onSegmentSelect }: {
   const visibleSegments = segments.filter((segment) => segment.value > 0);
   let cursor = 0;
   return <figure className="p4-pie-figure">
-    <div className="p4-pie-heading"><span>{subtitle}</span><strong>{title}</strong></div>
+    <div className="p4-pie-heading"><span>{subtitle}</span><div><strong>{title}</strong>{headingControl}</div></div>
     <div className="p4-pie-stage">
       <span className="p4-pie-graffiti" aria-hidden="true">{'//// TRUTH! ✦'}</span>
       <div className="p4-pie-disc">
@@ -355,6 +376,10 @@ function MetricTrend({ title, values, tone, onPointSelect }: { title: string; va
 export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate }: LifeDashboardProps) {
   const [typeRankMode, setTypeRankMode] = useState<TypeRankMode>('total');
   const [loadMode, setLoadMode] = useState<LoadMode>('factions');
+  const [factionTimeMode, setFactionTimeMode] = useState<FactionTimeMode>(() => {
+    if (typeof window === 'undefined') return 'merged';
+    return window.sessionStorage.getItem(FACTION_TIME_MODE_SESSION_KEY) === 'stacked' ? 'stacked' : 'merged';
+  });
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DashboardDrilldownData | null>(null);
   const periodSelectorRef = useRef<HTMLDivElement>(null);
@@ -375,7 +400,8 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   const trendMetrics = trendPeriods.map((item) => ({ period: item, metrics: periodMetrics(item, tasks, deadlineEvents, sleepRecords, now) }));
   const loadBuckets = buildLoadBuckets(period, scale, tasks);
   const maxLoad = Math.max(1, ...loadBuckets.map((bucket) => bucket.total));
-  const colorSegments = metrics.tones.map((tone) => ({ id: tone.tone, label: TONE_META[tone.tone].label, value: tone.minutes, color: `var(--dashboard-${tone.tone})` }));
+  const mergedFactionMinutes = useMemo(() => TONES.reduce((values, tone) => ({ ...values, [tone]: mergedToneMinutes(tasks, tone, period, now) }), {} as Record<DashboardTone, number>), [now, period, tasks]);
+  const colorSegments = metrics.tones.map((tone) => ({ id: tone.tone, label: TONE_META[tone.tone].label, value: factionTimeMode === 'merged' ? mergedFactionMinutes[tone.tone] : tone.minutes, color: `var(--dashboard-${tone.tone})` }));
   const typeSegments = metrics.types.map((type, index) => ({ id: type.label, label: type.label, value: type.minutes, color: `color-mix(in srgb,var(--dashboard-${type.tone}) ${58 + index % 4 * 10}%,${index % 2 ? 'var(--color-paper)' : 'var(--color-ink)'})` }));
   const rankedTypes = [...metrics.types].sort((a, b) => typeRankMode === 'total' ? b.minutes - a.minutes : b.average - a.average);
   const maxTypeMetric = Math.max(1, ...rankedTypes.map((type) => typeRankMode === 'total' ? type.minutes : type.average));
@@ -468,11 +494,12 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       groups: groups.map((group) => ({ id: group.id, label: group.label, countLabel: `${group.tasks.length} MISSIONS`, tone: group.tone, items: group.tasks.map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
     });
   };
-  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string) => {
+  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string, toneTimeMode: FactionTimeMode = 'stacked') => {
     const tracked = tasks.map((task) => ({ task, minutes: intervalMinutes(task, period, now) })).filter((item) => item.minutes > 0);
     const matching = tracked.filter(({ task }) => kind === 'tone' ? task.tone === id : task.taskType === id).sort((a, b) => b.minutes - a.minutes);
-    const selectedMinutes = matching.reduce((sum, item) => sum + item.minutes, 0);
-    const totalMinutes = tracked.reduce((sum, item) => sum + item.minutes, 0);
+    const useMergedToneTime = kind === 'tone' && toneTimeMode === 'merged';
+    const selectedMinutes = useMergedToneTime ? mergedToneMinutes(tasks, id as DashboardTone, period, now) : matching.reduce((sum, item) => sum + item.minutes, 0);
+    const totalMinutes = useMergedToneTime ? TONES.reduce((sum, tone) => sum + mergedToneMinutes(tasks, tone, period, now), 0) : tracked.reduce((sum, item) => sum + item.minutes, 0);
     const ratio = totalMinutes ? selectedMinutes / totalMinutes * 100 : 0;
     const tone = kind === 'tone' ? id as DashboardTone : matching[0]?.task.tone ?? 'purple';
     const label = kind === 'tone' ? `${TONE_META[tone].signal} / ${TONE_META[tone].label}` : id;
@@ -482,11 +509,15 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       periodLabel: period.label,
       metric: `${ratio.toFixed(1)}%`,
       metricLabel: `${formatDuration(selectedMinutes)} OF ${formatDuration(totalMinutes)}`,
-      formula: `${formatDuration(selectedMinutes)} SELECTED TIME ÷ ${formatDuration(totalMinutes)} TOTAL TIME`,
+      formula: `${formatDuration(selectedMinutes)} ${useMergedToneTime ? 'MERGED' : 'SELECTED'} TIME ÷ ${formatDuration(totalMinutes)} TOTAL TIME`,
       accent: kind === 'tone' ? 'purple' : 'blue',
       groups: [{ id: 'contributors', label: 'CONTRIBUTING MISSIONS / 耗时来源', countLabel: `${matching.length} MISSIONS`, items: matching.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期计入 ${formatDuration(minutes)} · START ${formatMoment(task.startedAt)} · END ${task.status === 'completed' ? formatMoment(task.completedAt) : 'NOW'}`)) }],
     });
   };
+
+  useEffect(() => {
+    window.sessionStorage.setItem(FACTION_TIME_MODE_SESSION_KEY, factionTimeMode);
+  }, [factionTimeMode]);
 
   useEffect(() => {
     if (!periodMenuOpen) return;
@@ -559,7 +590,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       <section className="allocation-panel">
         <header><div><span>05 / TIME FACTIONS</span><h3>ALLOCATION MAP</h3></div></header>
         <div className="allocation-pies">
-          <PieChart title="FACTION SHARE" subtitle="4 COLOR FACTIONS" segments={colorSegments} onSegmentSelect={(segment) => openAllocationDrilldown('tone', segment.id)} />
+          <PieChart title="FACTION SHARE" subtitle="4 COLOR FACTIONS" segments={colorSegments} headingControl={<div className="faction-time-mode" role="group" aria-label="四色阵营耗时计算方式"><button type="button" title="同色重叠时间只计算一次" aria-pressed={factionTimeMode === 'merged'} onClick={() => setFactionTimeMode('merged')}>MERGED</button><button type="button" title="每个任务耗时分别累计" aria-pressed={factionTimeMode === 'stacked'} onClick={() => setFactionTimeMode('stacked')}>STACKED</button></div>} onSegmentSelect={(segment) => openAllocationDrilldown('tone', segment.id, factionTimeMode)} />
           <PieChart title="TYPE SHARE" subtitle="ALL TASK TYPES" segments={typeSegments} onSegmentSelect={(segment) => openAllocationDrilldown('type', segment.id)} />
         </div>
       </section>

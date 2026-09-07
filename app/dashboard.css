@@ -245,8 +245,14 @@
 .p4-pie-figure { position: relative; display: grid; grid-template-rows: auto minmax(190px, 1fr); min-height: 0; margin: 0; border-bottom: 5px solid var(--color-ink); }
 .p4-pie-figure:last-child { border-bottom: 0; }
 .p4-pie-heading { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; color: var(--color-ink); background: var(--color-signal); }
+.p4-pie-heading > div { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
 .p4-pie-heading span { font-size: .66rem; font-weight: 1000; letter-spacing: .09em; }
 .p4-pie-heading strong { font-size: .82rem; }
+.faction-time-mode { display: flex; gap: 2px; padding: 2px; background: var(--color-ink); border: 1px solid var(--color-ink); }
+.faction-time-mode button { min-height: 20px; padding: 2px 5px; color: var(--color-paper); background: #34352e; border: 1px solid #6b6c61; font-size: .5rem; font-weight: 1000; letter-spacing: .035em; cursor: pointer; }
+.faction-time-mode button:hover,
+.faction-time-mode button:focus-visible { color: var(--color-ink); background: var(--color-paper); outline: 2px solid var(--color-ink); outline-offset: 1px; }
+.faction-time-mode button[aria-pressed='true'] { color: var(--color-ink); background: var(--color-signal); border-color: var(--color-paper); }
 .p4-pie-stage { position: relative; min-height: 190px; display: grid; place-items: center; overflow: hidden; padding-bottom: 90px; perspective: 780px; background: radial-gradient(ellipse at 46% 47%, rgb(247 226 27 / 26%), transparent 57%), repeating-radial-gradient(ellipse at center, transparent 0 30px, rgb(17 18 15 / 8%) 31px 33px); }
 .p4-pie-figure:first-child .p4-pie-stage { padding-bottom: 66px; }
 .p4-pie-figure:last-child .p4-pie-stage { padding-bottom: 108px; }
@@ -535,6 +541,11 @@
 .view-dashboard.theme-night .mission-load-panel footer i { border-color: var(--dashboard-night-text); }
 
 .view-dashboard.theme-night .p4-pie-heading { color: var(--dashboard-night-text); background: #10110d; box-shadow: inset 0 -4px 0 var(--dashboard-night-gold); }
+.view-dashboard.theme-night .faction-time-mode { background: #080806; border-color: var(--dashboard-night-line); }
+.view-dashboard.theme-night .faction-time-mode button { color: var(--dashboard-night-muted); background: var(--dashboard-night-control); border-color: var(--dashboard-night-line); }
+.view-dashboard.theme-night .faction-time-mode button:hover,
+.view-dashboard.theme-night .faction-time-mode button:focus-visible { color: #090a08; background: var(--dashboard-night-text); outline-color: var(--dashboard-night-gold); }
+.view-dashboard.theme-night .faction-time-mode button[aria-pressed='true'] { color: #090a08; background: var(--dashboard-night-gold); border-color: var(--dashboard-night-text); }
 .view-dashboard.theme-night .p4-pie-figure { border-color: #090a07; }
 .view-dashboard.theme-night .p4-pie-stage { color: var(--dashboard-night-text); background: radial-gradient(ellipse at 46% 43%, rgb(224 202 70 / 5%), transparent 55%), repeating-radial-gradient(ellipse at center, transparent 0 30px, rgb(238 234 203 / 6%) 31px 33px), var(--dashboard-night-surface); }
 .view-dashboard.theme-night .p4-pie-stage::before { border-color: var(--dashboard-night-line); }
