@@ -128,7 +128,7 @@ const boardMeta: { id: Status; index: string; title: string; subtitle: string }[
 ];
 
 const navItems: { id: View; no: string; title: string; subtitle: string; mark: string }[] = [
-  { id: 'dashboard', no: '00', title: 'LIFE COMMAND', subtitle: '生活作战中枢', mark: '◉' },
+  { id: 'dashboard', no: '00', title: 'LIFE COMMAND', subtitle: '战役指挥中心', mark: '◉' },
   { id: 'board', no: '01', title: 'DAILY OPS', subtitle: '每日作战计划', mark: '▶' },
   { id: 'table', no: '02', title: 'MISSION ARCHIVE', subtitle: '任务档案表', mark: '▦' },
   { id: 'sleep', no: '03', title: 'NIGHT LOG', subtitle: '夜间状态档案', mark: '☾' },
