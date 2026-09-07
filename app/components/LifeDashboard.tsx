@@ -494,7 +494,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       groups: groups.map((group) => ({ id: group.id, label: group.label, countLabel: `${group.tasks.length} MISSIONS`, tone: group.tone, items: group.tasks.map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
     });
   };
-  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string, toneTimeMode: FactionTimeMode = 'stacked') => {
+  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string, toneTimeMode: FactionTimeMode = 'stacked', hideTitle = false) => {
     const tracked = tasks.map((task) => ({ task, minutes: intervalMinutes(task, period, now) })).filter((item) => item.minutes > 0);
     const matching = tracked.filter(({ task }) => kind === 'tone' ? task.tone === id : task.taskType === id).sort((a, b) => b.minutes - a.minutes);
     const useMergedToneTime = kind === 'tone' && toneTimeMode === 'merged';
@@ -505,7 +505,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     const label = kind === 'tone' ? `${TONE_META[tone].signal} / ${TONE_META[tone].label}` : id;
     setDrilldown({
       index: kind === 'tone' ? '05A' : '05B',
-      title: `${label} · TIME SHARE`,
+      title: hideTitle ? '' : `${label} · TIME SHARE`,
       periodLabel: period.label,
       metric: `${ratio.toFixed(1)}%`,
       metricLabel: `${formatDuration(selectedMinutes)} OF ${formatDuration(totalMinutes)}`,
@@ -596,8 +596,8 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       </section>
 
       <section className="time-rank-panel">
-        <header><div><span>06 / PERFORMANCE SCAN</span></div><div className="type-rank-mode" role="group" aria-label="选择任务类型排名依据"><button type="button" aria-pressed={typeRankMode === 'total'} onClick={() => setTypeRankMode('total')}>TOTAL 排名</button><button type="button" aria-pressed={typeRankMode === 'average'} onClick={() => setTypeRankMode('average')}>AVG 排名</button></div></header>
-        <div className="color-time-roster">{metrics.tones.map((tone) => <article key={tone.tone} className={`tone-${tone.tone} is-actionable`} role="button" tabIndex={0} aria-label={`${TONE_META[tone.tone].label}耗时明细`} onClick={() => openAllocationDrilldown('tone', tone.tone)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAllocationDrilldown('tone', tone.tone); } }}><i /><div><span>{TONE_META[tone.tone].signal}</span><strong>{TONE_META[tone.tone].label}</strong></div><dl><div><dt>TOTAL</dt><dd>{formatDuration(tone.minutes)}</dd></div><div><dt>AVG / TASK</dt><dd>{formatDuration(tone.average)}</dd></div><div><dt>TASKS</dt><dd>{tone.count}</dd></div></dl></article>)}</div>
+        <header><div><span>06 / PERFORMANCE SCAN</span><h3>TIME INTELLIGENCE</h3></div><div className="type-rank-mode" role="group" aria-label="选择任务类型排名依据"><button type="button" aria-pressed={typeRankMode === 'total'} onClick={() => setTypeRankMode('total')}>TOTAL 排名</button><button type="button" aria-pressed={typeRankMode === 'average'} onClick={() => setTypeRankMode('average')}>AVG 排名</button></div></header>
+        <div className="color-time-roster">{metrics.tones.map((tone) => <article key={tone.tone} className={`tone-${tone.tone} is-actionable`} role="button" tabIndex={0} aria-label={`${TONE_META[tone.tone].label}耗时明细`} onClick={() => openAllocationDrilldown('tone', tone.tone, 'stacked', true)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAllocationDrilldown('tone', tone.tone, 'stacked', true); } }}><i /><div><span>{TONE_META[tone.tone].signal}</span><strong>{TONE_META[tone.tone].label}</strong></div><dl><div><dt>TOTAL</dt><dd>{formatDuration(tone.minutes)}</dd></div><div><dt>AVG / TASK</dt><dd>{formatDuration(tone.average)}</dd></div><div><dt>TASKS</dt><dd>{tone.count}</dd></div></dl></article>)}</div>
         <div className="type-rank-head"><span>RANK / TYPE</span><span>{typeRankMode === 'total' ? 'TOTAL SCALE' : 'AVG SCALE'}</span><span>TOTAL</span><span>AVG</span><span>SHARE</span></div>
         <div className="type-rank-list">{rankedTypes.map((type, index) => {
           const metric = typeRankMode === 'total' ? type.minutes : type.average;
