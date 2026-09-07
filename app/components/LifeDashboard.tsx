@@ -494,7 +494,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       groups: groups.map((group) => ({ id: group.id, label: group.label, countLabel: `${group.tasks.length} MISSIONS`, tone: group.tone, items: group.tasks.map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
     });
   };
-  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string, toneTimeMode: FactionTimeMode = 'stacked', hideTitle = false) => {
+  const openAllocationDrilldown = (kind: 'tone' | 'type', id: string, toneTimeMode: FactionTimeMode = 'stacked', compactTitle = false) => {
     const tracked = tasks.map((task) => ({ task, minutes: intervalMinutes(task, period, now) })).filter((item) => item.minutes > 0);
     const matching = tracked.filter(({ task }) => kind === 'tone' ? task.tone === id : task.taskType === id).sort((a, b) => b.minutes - a.minutes);
     const useMergedToneTime = kind === 'tone' && toneTimeMode === 'merged';
@@ -505,7 +505,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     const label = kind === 'tone' ? `${TONE_META[tone].signal} / ${TONE_META[tone].label}` : id;
     setDrilldown({
       index: kind === 'tone' ? '05A' : '05B',
-      title: hideTitle ? '' : `${label} · TIME SHARE`,
+      title: compactTitle ? label : `${label} · TIME SHARE`,
       periodLabel: period.label,
       metric: `${ratio.toFixed(1)}%`,
       metricLabel: `${formatDuration(selectedMinutes)} OF ${formatDuration(totalMinutes)}`,

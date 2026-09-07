@@ -63,9 +63,9 @@ export function DashboardDrilldown({ data, onClose }: { data: DashboardDrilldown
   }, [onClose]);
 
   return <div className="dashboard-drilldown-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialogRef} className={`dashboard-drilldown drilldown-${data.accent}`} role="dialog" aria-modal="true" aria-labelledby={data.title ? 'dashboard-drilldown-title' : undefined} aria-label={data.title ? undefined : `${data.index} CASE FILE`}>
+    <section ref={dialogRef} className={`dashboard-drilldown drilldown-${data.accent}`} role="dialog" aria-modal="true" aria-labelledby="dashboard-drilldown-title">
       <header>
-        <div><span>{data.index} / CASE FILE</span>{data.title && <h2 id="dashboard-drilldown-title">{data.title}</h2>}<p>{data.periodLabel}</p></div>
+        <div><span>{data.index} / CASE FILE</span><h2 id="dashboard-drilldown-title">{data.title}</h2><p>{data.periodLabel}</p></div>
         <div className="drilldown-metric"><strong>{data.metric}</strong><span>{data.metricLabel}</span></div>
         <button ref={closeRef} type="button" onClick={onClose} aria-label="关闭战报档案">×</button>
       </header>
