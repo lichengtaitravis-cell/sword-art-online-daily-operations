@@ -2,13 +2,14 @@
 
 import { FormEvent, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BrandLockup } from './components/BrandLockup';
+import { LifeDashboard, type DashboardTask } from './components/LifeDashboard';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
 
 type Status = 'pending' | 'inProgress' | 'completed';
 type Priority = 'must' | 'high' | 'medium' | 'low';
 type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly';
-type View = 'board' | 'table' | 'calendar' | 'sleep' | 'settings';
+type View = 'dashboard' | 'board' | 'table' | 'calendar' | 'sleep' | 'settings';
 type ChoiceFieldName = 'status' | 'priority' | 'taskType' | 'location' | 'recurrence';
 type DateFieldName = 'startedAt' | 'completedAt' | 'dueAt';
 type TypeColor = 'purple' | 'blue' | 'green' | 'yellow';
@@ -124,6 +125,7 @@ const boardMeta: { id: Status; index: string; title: string; subtitle: string }[
 ];
 
 const navItems: { id: View; no: string; title: string; subtitle: string; mark: string }[] = [
+  { id: 'dashboard', no: '00', title: 'LIFE COMMAND', subtitle: '生活作战中枢', mark: '◉' },
   { id: 'board', no: '01', title: 'DAILY OPS', subtitle: '每日作战计划', mark: '▶' },
   { id: 'table', no: '02', title: 'MISSION ARCHIVE', subtitle: '任务档案表', mark: '▦' },
   { id: 'sleep', no: '03', title: 'NIGHT LOG', subtitle: '夜间状态档案', mark: '☾' },
@@ -1135,7 +1137,7 @@ export default function Home() {
   const remindersReady = useRef(false);
   const pendingSortRef = useRef<HTMLDivElement>(null);
   const scheduleTimelineRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<View>('board');
+  const [view, setView] = useState<View>('dashboard');
   const [viewRestored, setViewRestored] = useState(false);
   const [dialogStateRestored, setDialogStateRestored] = useState(false);
   const [introVisible, setIntroVisible] = useState(false);
@@ -1768,6 +1770,20 @@ export default function Home() {
   };
   const now = clock;
   const todayActionTasks = missionTasks.filter((task) => taskOccursInActionDay(task, localDateKey(now), now));
+  const dashboardTasks: DashboardTask[] = missionTasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    description: descriptionToText(task.description),
+    status: task.status,
+    taskType: task.taskType,
+    priority: task.priority,
+    location: task.location,
+    startedAt: task.startedAt,
+    completedAt: task.completedAt,
+    dueAt: task.dueAt,
+    tone: typeColor(task.taskType, settings),
+  }));
+  const dashboardTodayTasks = dashboardTasks.filter((task) => todayActionTasks.some((todayTask) => todayTask.id === task.id));
   const completedToday = todayActionTasks.filter((task) => task.completedAt && localDateKey(new Date(task.completedAt)) === localDateKey(now)).length;
   const selectedDayTasks = missionTasks.filter((task) => taskOccursInActionDay(task, selectedDay, now)).sort((a, b) => +new Date(calendarTaskDate(a, now)) - +new Date(calendarTaskDate(b, now)));
   const dayScheduleBlocks = useMemo(() => layoutDaySchedule(selectedDayTasks, selectedDay, now), [selectedDayTasks, selectedDay, now]);
@@ -1848,6 +1864,18 @@ export default function Home() {
       <div className="mission-summary"><span>TODAY&apos;S CLEAR</span><strong>{completedToday}<small> / {todayActionTasks.length}</small></strong><div className="summary-track"><i style={{ width: `${todayActionTasks.length ? Math.min(100, completedToday / todayActionTasks.length * 100) : 0}%` }} /></div></div>
       {view !== 'settings' && view !== 'sleep' && <button className="add-task" onClick={() => openNewTask()}><span>＋</span><strong>NEW MISSION</strong><small>添加任务</small></button>}
     </header>
+
+    {view === 'dashboard' && <LifeDashboard
+      username={settings.username}
+      now={now}
+      tasks={dashboardTasks}
+      todayTasks={dashboardTodayTasks}
+      sleepRecords={sleepRecords}
+      onOpenTask={(id) => { const task = missionTasks.find((item) => item.id === id); if (task) setDraft(task); }}
+      onStartTask={(id) => moveTask(id, 'inProgress')}
+      onNewTask={() => openNewTask()}
+      onNavigate={(nextView) => navigateTo(nextView)}
+    />}
 
     {view === 'board' && <div className="board-control-rack">
       <button type="button" className="daily-flow-shortcut" onClick={() => { setSelectedDay(localDateKey(now)); setLinkedScheduleTaskId(''); setDayAgendaOpen(true); }}><i aria-hidden="true">▥</i><strong>DAILY FLOW</strong><small>今日战线</small></button>

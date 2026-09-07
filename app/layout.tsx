@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './dashboard.css';
 import './brand.css';
 
 export const metadata: Metadata = {
-  title: 'Sword Art Online — Daily Operations',
-  description: 'A fast, tactile daily planning board for turning pending missions into completed wins.',
+  title: 'Sword Art Online — Life Command',
+  description: 'A local-first life command dashboard for missions, time, routines, and daily progress.',
   icons: {
     icon: '/sao-tv-icon-v2.png',
     shortcut: '/sao-tv-icon-v2.png',
