@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BrandLockup } from './components/BrandLockup';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
@@ -16,6 +16,7 @@ type CountdownUrgency = 'oneHour' | 'halfHour' | 'fifteen' | 'five' | 'finalMinu
 type CountdownKind = 'start' | 'deadline';
 type PendingSort = 'priority' | 'start' | 'deadline' | 'custom';
 type BoardDensity = 'standard' | 'compact';
+type SleepDisplayMode = 'standard' | 'compact';
 type ArchiveFilterOption = { value: string; label: string; tone?: string };
 type ScheduleVariant = 'pending-start' | 'pending-deadline' | 'pending-range' | 'in-progress' | 'completed';
 type DayScheduleBlock = { id: string; task: Task; startMinute: number; endMinute: number; labelStartMinute: number; labelEndMinute: number; lane: number; laneCount: number; offline: boolean; variant: ScheduleVariant; continuesBefore: boolean; continuesAfter: boolean; terminal: boolean };
@@ -83,6 +84,7 @@ const VIEW_SESSION_KEY = 'sao-planner-active-view-v1';
 const DIALOG_SESSION_KEY = 'sao-planner-dialog-state-v1';
 const PENDING_SORT_SESSION_KEY = 'sao-planner-pending-sort-v1';
 const BOARD_DENSITY_SESSION_KEY = 'sao-planner-board-density-v1';
+const SLEEP_STANDARD_LIMIT = 10;
 const VISIBLE_LIMIT: Record<BoardDensity, Record<Status, number>> = {
   standard: { pending: 5, inProgress: 5, completed: 5 },
   compact: { pending: 9, inProgress: 9, completed: 9 },
@@ -374,6 +376,25 @@ function sleepDayPosition(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 0;
   return (date.getHours() * 60 + date.getMinutes()) / (24 * 60) * 100;
+}
+
+function circularMeanTime(records: SleepRecord[], selectValue: (record: SleepRecord) => string) {
+  if (!records.length) return null;
+  const vectors = records.reduce((total, record) => {
+    const date = new Date(selectValue(record));
+    if (Number.isNaN(date.getTime())) return total;
+    const minutes = date.getHours() * 60 + date.getMinutes();
+    const angle = minutes / (24 * 60) * Math.PI * 2;
+    return { x: total.x + Math.cos(angle), y: total.y + Math.sin(angle), count: total.count + 1 };
+  }, { x: 0, y: 0, count: 0 });
+  if (!vectors.count) return null;
+  const angle = Math.atan2(vectors.y / vectors.count, vectors.x / vectors.count);
+  return Math.round(((angle < 0 ? angle + Math.PI * 2 : angle) / (Math.PI * 2)) * 24 * 60) % (24 * 60);
+}
+
+function formatClockMinutes(minutes: number | null) {
+  if (minutes === null) return '—';
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 function statusLabel(status: Status) {
@@ -1170,6 +1191,8 @@ export default function Home() {
   const [sleepPickerDate, setSleepPickerDate] = useState(localDateKey(new Date()));
   const [sleepPickerTime, setSleepPickerTime] = useState('00:00');
   const [sleepPickerMonth, setSleepPickerMonth] = useState(() => { const date = new Date(); date.setDate(1); return date; });
+  const [sleepDisplayMode, setSleepDisplayMode] = useState<SleepDisplayMode>('standard');
+  const [sleepStandardExpanded, setSleepStandardExpanded] = useState(false);
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
   const [repeaterDraggingId, setRepeaterDraggingId] = useState('');
   const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
@@ -1547,12 +1570,14 @@ export default function Home() {
     if (!draft || !draft.title.trim()) return;
     setTasks((current) => {
       const existing = current.find((task) => task.id === draft.id);
-      const scheduleOverride = Boolean(existing && !draft.isRecurrenceTemplate && existing.recurrence !== 'none' && (draft.startedAt !== existing.startedAt || draft.dueAt !== existing.dueAt));
+      const titleOverride = Boolean(existing && !draft.isRecurrenceTemplate && existing.recurrence !== 'none' && draft.title.trim() !== existing.title.trim());
       let saved = existing && existing.status !== draft.status ? transitionTask({ ...draft, status: existing.status }, draft.status) : draft;
-      const savedRecurrence = scheduleOverride ? 'none' : saved.recurrence;
+      const savedRecurrence = titleOverride ? 'none' : saved.recurrence;
       const recurrenceStartTime = savedRecurrence === 'none'
         ? ''
-        : saved.status === 'pending' && saved.startedAt
+        : existing && !saved.isRecurrenceTemplate
+          ? existing.recurrenceStartTime
+          : saved.status === 'pending' && saved.startedAt
           ? localTimeKey(saved.startedAt)
           : saved.recurrenceStartTime || localTimeKey(saved.startedAt);
       saved = { ...saved, status: saved.isRecurrenceTemplate ? 'pending' : saved.status, completedAt: saved.isRecurrenceTemplate ? '' : saved.completedAt, recurrence: savedRecurrence, seriesHead: saved.isRecurrenceTemplate && savedRecurrence !== 'none', recurrenceDays: savedRecurrence === 'weekly' && !saved.recurrenceDays.length ? [new Date().getDay()] : saved.recurrenceDays, recurrenceStartTime };
@@ -1776,6 +1801,17 @@ export default function Home() {
     };
   }, [sleepRecords, now]);
   const sleepTimelineRecords = useMemo(() => [...sleepRecords].sort((first, second) => new Date(second.wakeAt).getTime() - new Date(first.wakeAt).getTime()), [sleepRecords]);
+  const sleepDistributionAverage = useMemo(() => ({
+    sleep: circularMeanTime(sleepTimelineRecords, (record) => record.sleepStartedAt),
+    wake: circularMeanTime(sleepTimelineRecords, (record) => record.wakeAt),
+  }), [sleepTimelineRecords]);
+  const displayedSleepTimelineRecords = sleepDisplayMode === 'standard' && !sleepStandardExpanded
+    ? sleepTimelineRecords.slice(0, SLEEP_STANDARD_LIMIT)
+    : sleepTimelineRecords;
+  const sleepDistributionStyle = {
+    '--mean-sleep': `${(sleepDistributionAverage.sleep ?? 0) / (24 * 60) * 100}%`,
+    '--mean-wake': `${(sleepDistributionAverage.wake ?? 0) / (24 * 60) * 100}%`,
+  } as CSSProperties;
 
   if (storageError) return <main className="app-shell boot-screen"><div className="boot-mark database-fault"><span>DATABASE OFFLINE</span><strong>LOCAL DATA<br />LINK LOST</strong><p>{storageError}</p><button type="button" onClick={() => { setStorageError(''); setLoadAttempt((current) => current + 1); }}>RETRY CONNECTION / 重试</button></div></main>;
   if (!viewRestored) return <main className="app-shell boot-screen boot-prime" aria-label="正在准备界面" />;
@@ -1874,11 +1910,11 @@ export default function Home() {
         </div>
       </header>
       <div className="sleep-rhythm-workbench">
-        <section className="sleep-rhythm-map" aria-label="全量睡眠时段分布">
-          <header><div><span>ARCHIVE VIEW / 全量记录</span><h3>SLEEP DISTRIBUTION</h3></div><p>{sleepTimelineRecords.length} RECORDS</p></header>
-          <div className="sleep-rhythm-legend"><span><i /> SLEEP WINDOW</span><span><b>00:00 → 24:00</b></span><small>ALL LOGGED NIGHTS</small></div>
+        <section className={`sleep-rhythm-map is-${sleepDisplayMode}`} aria-label="全量睡眠时段分布" style={sleepDistributionStyle}>
+          <header><div><span>ARCHIVE VIEW / 全量记录</span><h3>SLEEP DISTRIBUTION</h3></div><div className="sleep-rhythm-map-controls"><p>{sleepTimelineRecords.length} RECORDS</p><div className="sleep-display-switch" aria-label="睡眠分布显示模式"><button type="button" className={sleepDisplayMode === 'standard' ? 'active' : ''} aria-pressed={sleepDisplayMode === 'standard'} onClick={() => setSleepDisplayMode('standard')}><i>▤</i><span>STANDARD</span></button><button type="button" className={sleepDisplayMode === 'compact' ? 'active' : ''} aria-pressed={sleepDisplayMode === 'compact'} onClick={() => setSleepDisplayMode('compact')}><i>▥</i><span>COMPACT</span></button></div></div></header>
+          <div className="sleep-rhythm-legend"><span><i /> SLEEP WINDOW</span><span className="sleep-mean-key mean-sleep"><b /> AVG SLEEP <strong>{formatClockMinutes(sleepDistributionAverage.sleep)}</strong></span><span className="sleep-mean-key mean-wake"><b /> AVG WAKE <strong>{formatClockMinutes(sleepDistributionAverage.wake)}</strong></span><small>FULL ARCHIVE</small></div>
           <div className="sleep-rhythm-axis" aria-hidden="true"><strong>00</strong><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div>
-          {sleepLoading ? <div className="sleep-rhythm-empty">LINKING LOCAL REST ARCHIVE…</div> : sleepTimelineRecords.length ? <div className="sleep-rhythm-list">{sleepTimelineRecords.map((record) => {
+          {sleepLoading ? <div className="sleep-rhythm-empty">LINKING LOCAL REST ARCHIVE…</div> : sleepTimelineRecords.length ? <><div className="sleep-rhythm-list"><div className="sleep-rhythm-mean-layer" aria-hidden="true"><b className="mean-sleep" /><b className="mean-wake" /></div>{displayedSleepTimelineRecords.map((record) => {
             const sleepStart = new Date(record.sleepStartedAt);
             const wakeTime = new Date(record.wakeAt);
             const startedAt = sleepDayPosition(record.sleepStartedAt);
@@ -1893,7 +1929,7 @@ export default function Home() {
               <div className="sleep-rhythm-track" aria-hidden="true">{crossesMidnight ? <><i className="sleep-rhythm-block" style={{ left: `${startedAt}%`, width: `${100 - startedAt}%` }} /><i className="sleep-rhythm-block is-continuation" style={{ left: 0, width: `${awakenedAt}%` }} /></> : <i className="sleep-rhythm-block" style={{ left: `${startedAt}%`, width: `${Math.max(0, awakenedAt - startedAt)}%` }} />}</div>
               <button type="button" className="sleep-rhythm-remove" onClick={() => void deleteSleepRecord(record.id)} aria-label={`删除 ${formatSleepDateTime(record.wakeAt)} 的睡眠记录`}>×<span>REMOVE</span></button>
             </article>;
-          })}</div> : <div className="sleep-rhythm-empty"><i>☾</i><strong>NO REST SIGNALS YET</strong><span>记录第一晚睡眠后，完整节律会显示在这里。</span></div>}
+          })}</div>{sleepDisplayMode === 'standard' && sleepTimelineRecords.length > SLEEP_STANDARD_LIMIT && <button type="button" className="sleep-rhythm-expand" aria-expanded={sleepStandardExpanded} onClick={() => setSleepStandardExpanded((expanded) => !expanded)}><span>{sleepStandardExpanded ? '收起较早记录' : `展开其余 ${sleepTimelineRecords.length - SLEEP_STANDARD_LIMIT} 晚`}</span><strong>{sleepStandardExpanded ? 'COLLAPSE ↑' : 'REVEAL ARCHIVE ↓'}</strong></button>}</> : <div className="sleep-rhythm-empty"><i>☾</i><strong>NO REST SIGNALS YET</strong><span>记录第一晚睡眠后，完整节律会显示在这里。</span></div>}
         </section>
         <aside className="sleep-rhythm-log">
           <header><span>LOG ENTRY</span><h3>LOG<br />REST</h3><p>记录入睡与醒来时间。</p></header>
@@ -1971,10 +2007,10 @@ export default function Home() {
     {draft && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setDraft(null); }}><form className="task-modal" onSubmit={saveDraft} role="dialog" aria-modal="true" aria-labelledby="task-dialog-title">
       <header className={`modal-header type-${typeColor(draft.taskType, settings)}`}><div><span>{draft.isRecurrenceTemplate ? 'REPEAT PROTOCOL' : 'MISSION DATA'}</span><h2 id="task-dialog-title">{draft.isRecurrenceTemplate ? '循环任务配置' : '任务详情'}</h2></div><button type="button" className="close-button" aria-label="关闭" onClick={() => setDraft(null)}>×</button></header>
       <div className="modal-body"><label className="field field-wide"><span>Title / 标题</span><input autoFocus value={draft.title} placeholder="这次要攻略什么？" onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label><RichTextDescription value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
-        <div className="form-grid">{!draft.isRecurrenceTemplate && <ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} />}<ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Start / 循环开始' : 'Start / 开始时间'} value={draft.startedAt} onClick={() => openDatePicker('startedAt')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Deadline / 循环截止' : 'Deadline / 截止时间'} value={draft.dueAt} onClick={() => openDatePicker('dueAt')} />{!draft.isRecurrenceTemplate && <DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} />}<ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} /></div>
-        {draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
+        <div className="form-grid">{!draft.isRecurrenceTemplate && <ChoiceField label="Status / 状态" value={statusLabel(draft.status)} onClick={() => setChoiceField('status')} />}<ChoiceField label="Priority / 优先级" value={priorityLabel(draft.priority)} onClick={() => setChoiceField('priority')} /><ChoiceField label="Task Type / 任务类型" value={draft.taskType} onClick={() => setChoiceField('taskType')} /><ChoiceField label="Location / 地点" value={draft.location} onClick={() => setChoiceField('location')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Start / 循环开始' : 'Start / 开始时间'} value={draft.startedAt} onClick={() => openDatePicker('startedAt')} /><DateChoice label={draft.isRecurrenceTemplate ? 'Planned Deadline / 循环截止' : 'Deadline / 截止时间'} value={draft.dueAt} onClick={() => openDatePicker('dueAt')} />{!draft.isRecurrenceTemplate && <DateChoice label="Complete / 完成时间" value={draft.completedAt} onClick={() => openDatePicker('completedAt')} />}{draft.isRecurrenceTemplate && <ChoiceField label="Repeat / 循环" value={recurrenceLabel(draft)} onClick={() => setChoiceField('recurrence')} />}</div>
+        {draft.isRecurrenceTemplate && draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
         {draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 这里保存独立循环模板；修改当天生成的任务不会改变本模板。</p>}
-        {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；修改开始或截止时间后，仅本次任务会脱离循环，模板保持不变。</p>}
+        {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；临时修改时间不会影响循环属性或原始设置，修改标题则会让本次任务脱离循环。</p>}
       </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>{draft.isRecurrenceTemplate ? '删除循环模板' : '删除任务'}</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">{draft.isRecurrenceTemplate ? '保存循环模板' : '保存任务'} <span>→</span></button></footer>
     </form></div>}
 

@@ -831,6 +831,76 @@ html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,.game-me
 .theme-night .repeat-drag-handle { color:var(--night-muted); }.theme-night .recurrence-series-item:hover .repeat-drag-handle { color:var(--ink); background:var(--night-gold); }
 @media (max-width:760px) { .recurrence-series-item { grid-template-columns:18px 34px minmax(0,1fr); }.recurrence-series-item>div { grid-column:3/4; }.recurrence-series-item>button:first-of-type { grid-column:2/3; }.recurrence-series-item .stop-repeat { grid-column:3/4; } }
 
+/* NIGHT LOG distribution modes: detailed ten-night archive or high-density signal field. */
+.sleep-rhythm-map-controls { position:relative; z-index:2; display:flex; flex-direction:column; align-items:flex-end; gap:7px; }
+.sleep-rhythm-map>header .sleep-rhythm-map-controls p { max-width:none; margin:0; padding:6px 9px; color:var(--paper); background:var(--ink); font:1000 9px/1 var(--font-ui); letter-spacing:.1em; white-space:nowrap; text-align:center; transform:skewX(-7deg); }
+.sleep-display-switch { display:flex; filter:drop-shadow(3px 3px 0 var(--ink)); }
+.sleep-display-switch button { min-height:32px; display:flex; align-items:center; gap:5px; padding:5px 9px; color:#777365; background:var(--paper); border:2px solid var(--ink); box-shadow:none; font:1000 8px/1 var(--font-ui); letter-spacing:.07em; cursor:pointer; }
+.sleep-display-switch button+button { margin-left:-2px; }
+.sleep-display-switch button i { color:var(--color-blue); font-size:13px; font-style:normal; }
+.sleep-rhythm-map>header .sleep-display-switch button span { display:inline; margin:0; color:inherit; font:inherit; letter-spacing:inherit; }
+.sleep-display-switch button:hover,.sleep-display-switch button:focus-visible { position:relative; z-index:1; color:var(--ink); background:#fff5aa; outline:3px solid var(--color-signal); outline-offset:2px; }
+.sleep-display-switch button.active { position:relative; z-index:1; color:var(--paper); background:var(--ink); transform:translate(-2px,-2px); }
+.sleep-display-switch button.active i { color:var(--color-signal); }
+.sleep-rhythm-legend { flex-wrap:wrap; justify-content:flex-start; }
+.sleep-rhythm-legend>small { margin-left:auto; }
+.sleep-rhythm-legend .sleep-mean-key { gap:5px; }
+.sleep-mean-key b { display:inline-block; width:3px; height:13px; background:var(--ink); }
+.sleep-mean-key.mean-wake b { width:4px; background:repeating-linear-gradient(to bottom,var(--ink) 0 3px,transparent 3px 5px); border-left:1px solid var(--paper); border-right:1px solid var(--paper); }
+.sleep-mean-key strong { color:var(--ink); font:1000 10px/1 var(--font-ui); font-variant-numeric:tabular-nums; }
+.sleep-rhythm-list { position:relative; }
+.sleep-rhythm-mean-layer { position:absolute; z-index:2; inset:0 72px 22px 225px; pointer-events:none; }
+.sleep-rhythm-mean-layer b { position:absolute; top:0; bottom:0; width:1px; transform:rotate(.12deg); transform-origin:center; opacity:.82; }
+.sleep-rhythm-mean-layer .mean-sleep { left:var(--mean-sleep); background:var(--ink); box-shadow:1px 0 0 rgba(255,253,242,.35); }
+.sleep-rhythm-mean-layer .mean-wake { left:var(--mean-wake); background:repeating-linear-gradient(to bottom,var(--color-signal-deep) 0 5px,rgba(17,18,15,.45) 5px 7px); transform:rotate(-.1deg); }
+.sleep-rhythm-block { z-index:3; }
+.sleep-rhythm-expand { width:calc(100% - 28px); min-height:45px; display:flex; align-items:center; justify-content:center; gap:12px; margin:0 14px 22px; color:var(--paper); background:var(--ink); border:2px solid var(--ink); box-shadow:4px 4px 0 var(--color-signal); font-family:var(--font-ui); cursor:pointer; }
+.sleep-rhythm-expand span { font:800 11px/1.2 var(--font-body); }
+.sleep-rhythm-expand strong { color:var(--color-signal); font:1000 9px/1 var(--font-ui); letter-spacing:.09em; }
+.sleep-rhythm-expand:hover,.sleep-rhythm-expand:focus-visible { color:var(--ink); background:var(--color-signal); outline:3px solid var(--ink); outline-offset:2px; transform:translate(-2px,-2px); box-shadow:6px 6px 0 var(--ink); }
+.sleep-rhythm-expand:hover strong,.sleep-rhythm-expand:focus-visible strong { color:var(--ink); }
+.sleep-rhythm-map.is-compact .sleep-rhythm-list { gap:0; padding-bottom:18px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-mean-layer { inset:0 22px 18px 87px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-row { grid-template-columns:58px minmax(180px,1fr); gap:7px; min-height:24px; padding:1px 8px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-row:hover { transform:translateX(2px); }
+.sleep-rhythm-map.is-compact .sleep-rhythm-date { display:flex; align-items:center; gap:4px; min-height:20px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-date span { display:inline; font-size:6px; letter-spacing:.04em; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-date strong { font-size:15px; line-height:1; letter-spacing:-.03em; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-date em { padding:2px 3px; font-size:6px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-window,.sleep-rhythm-map.is-compact .sleep-rhythm-remove { display:none; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-track { height:15px; }
+.sleep-rhythm-map.is-compact .sleep-rhythm-block { top:2px; height:9px; }
+.theme-night .sleep-display-switch { filter:drop-shadow(3px 3px 0 #080806); }
+.theme-night .sleep-display-switch button { color:var(--night-muted); background:var(--night-control); border-color:var(--night-line); }
+.theme-night .sleep-display-switch button.active { color:#080806; background:var(--night-gold); }
+.theme-night .sleep-display-switch button.active i { color:#080806; }
+.theme-night .sleep-display-switch button:hover,.theme-night .sleep-display-switch button:focus-visible { color:#080806; background:var(--night-text); outline-color:var(--night-gold); }
+.view-sleep.theme-night .sleep-mean-key b { background:#080806; }
+.view-sleep.theme-night .sleep-mean-key.mean-wake b { background:repeating-linear-gradient(to bottom,#080806 0 3px,transparent 3px 5px); border-color:var(--sleep-night-text); }
+.view-sleep.theme-night .sleep-rhythm-mean-layer .mean-sleep { background:var(--sleep-night-text); box-shadow:1px 0 0 rgba(8,8,6,.55); }
+.view-sleep.theme-night .sleep-rhythm-mean-layer .mean-wake { background:repeating-linear-gradient(to bottom,var(--sleep-night-gold) 0 5px,rgba(238,234,203,.48) 5px 7px); }
+.view-sleep.theme-night .sleep-rhythm-expand { color:var(--sleep-night-text); background:#10110d; border-color:var(--sleep-night-line); box-shadow:4px 4px 0 var(--sleep-night-gold); }
+.view-sleep.theme-night .sleep-rhythm-expand strong { color:var(--sleep-night-gold); }
+.view-sleep.theme-night .sleep-rhythm-expand:hover,.view-sleep.theme-night .sleep-rhythm-expand:focus-visible { color:#080806; background:var(--sleep-night-gold); outline-color:var(--sleep-night-text); box-shadow:6px 6px 0 #080806; }
+.view-sleep.theme-night .sleep-rhythm-expand:hover strong,.view-sleep.theme-night .sleep-rhythm-expand:focus-visible strong { color:#080806; }
+@media (max-width:760px) {
+  .sleep-rhythm-map>header { align-items:flex-start; }
+  .sleep-rhythm-map-controls { flex-shrink:0; gap:5px; }
+  .sleep-rhythm-map>header .sleep-rhythm-map-controls p { align-self:flex-end; padding:5px 7px; font-size:7px; }
+  .sleep-display-switch button { min-height:29px; padding:4px 7px; }
+  .sleep-display-switch button span { display:none!important; }
+  .sleep-rhythm-legend { gap:7px 10px; }
+  .sleep-rhythm-legend>small { display:none; }
+  .sleep-mean-key strong { font-size:8px; }
+  .sleep-rhythm-map.is-compact .sleep-rhythm-axis { margin-left:73px; margin-right:15px; }
+  .sleep-rhythm-mean-layer { inset:0 54px 16px 61px; }
+  .sleep-rhythm-map.is-compact .sleep-rhythm-mean-layer { inset:0 11px 16px 73px; }
+  .sleep-rhythm-map.is-compact .sleep-rhythm-row { grid-template-columns:55px minmax(150px,1fr); min-height:23px; padding:1px 4px; }
+  .sleep-rhythm-map.is-compact .sleep-rhythm-date { grid-row:auto; }
+  .sleep-rhythm-map.is-compact .sleep-rhythm-date em { display:inline-block; }
+  .sleep-rhythm-expand { width:calc(100% - 14px); margin:0 7px 16px; }
+}
+
 /* DAILY OPS density switch and compact mission-card system. */
 .board-control-rack { position:relative; z-index:4; height:0; display:flex; align-items:flex-start; justify-content:flex-end; gap:10px; margin:0 8px 0 auto; transform:translateY(-42px) skewX(-3deg); }
 .board-density-control { position:relative; width:max-content; height:34px; min-height:34px; display:flex; align-items:flex-start; gap:0; filter:drop-shadow(3px 3px 0 var(--ink)); }
