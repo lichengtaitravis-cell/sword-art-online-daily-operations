@@ -2,9 +2,9 @@
 
 ## Project overview
 
-This workspace contains a single-page task planner with a Sword Art Online-inspired visual design. It is a TypeScript/React application using the Next.js App Router API through Vinext, with Vite and the Cloudflare Vite plugin as the local and production runtime.
+This workspace contains a single-page task planner with a Sword Art Online-inspired visual design. It is a TypeScript/React application using the Next.js App Router API through Vinext, with Vite and the Cloudflare Vite plugin as the local runtime.
 
-The application is local-first and uses `data/sword-art-online.sqlite` as its sole source of truth. A small loopback-only Node API owns SQLite access. Browser `localStorage` is read only by a guarded one-time migration on the active frontend origin and is cleared after a confirmed import. There is no hosted database binding configured in `.openai/hosting.json`.
+The application is intentionally local-only and uses `data/sword-art-online.sqlite` as its sole source of truth. A small loopback-only Node API owns SQLite access. Browser `localStorage` is read only by a guarded one-time migration on the active frontend origin and is cleared after a confirmed import. Do not create Sites configuration, add a Sites plugin, or publish/deploy this application. A request to run the application means its local `localhost` workflow unless the user explicitly names a different hosting target.
 
 ## Repository map
 
@@ -18,8 +18,7 @@ The application is local-first and uses `data/sword-art-online.sqlite` as its so
 - `docs/DATA_ARCHITECTURE.md`: SQLite schema, migration, backup, and future integration contract.
 - `docs/moodboard/p4g/`: user-provided internal visual evidence; never ship these images as product assets.
 - `app/layout.tsx`: root HTML layout and page metadata.
-- `vite.config.ts`: Vinext, OpenAI Sites, Tailwind PostCSS, and Cloudflare configuration.
-- `.openai/hosting.json`: optional Sites storage bindings; both D1 and R2 are currently disabled.
+- `vite.config.ts`: Vinext, Tailwind PostCSS, and Cloudflare local-runtime configuration.
 - `scripts/local-db-server.mjs`: loopback API and SQLite schema/transactions.
 - `scripts/run-local-app.mjs`: lifecycle wrapper that starts and stops SQLite with Vinext.
 - `scripts/recover-legacy-storage.mjs`: explicit, non-destructive browser-origin recovery page for pre-SQLite data.
@@ -50,7 +49,7 @@ A Python virtual environment exists at `.venv`, but the web application does not
 - Do not restore `localStorage` as a write target or fallback source of truth. The only allowed reads are inside the guarded first-run migration.
 - Keep the local API bound to `127.0.0.1`. Do not expose it to a LAN or public network without adding authentication and explicit user approval.
 - Keep browser-only APIs inside client components or effects. `app/page.tsx` is intentionally marked with `'use client'`.
-- Do not add D1 or R2 assumptions unless `.openai/hosting.json` is updated as part of the same feature.
+- Do not add D1, R2, or remote-hosting assumptions without an explicit architecture change approved by the user.
 - Never edit generated directories or commit secrets and local `.env*` files.
 
 ## Visual design harness
