@@ -382,7 +382,9 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   });
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DashboardDrilldownData | null>(null);
+  const [sleepSmaGeometry, setSleepSmaGeometry] = useState<{ sourceKey: string; left: number; top: number; width: number; height: number; points: { id: string; x: number; y: number }[] } | null>(null);
   const periodSelectorRef = useRef<HTMLDivElement>(null);
+  const sleepRhythmRef = useRef<HTMLDivElement>(null);
   const earliest = useMemo(() => {
     const dates = [
       ...tasks.flatMap((task) => [taskOperationalDate(task), validDate(task.completedAt)]),
@@ -407,6 +409,37 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   const maxTypeMetric = Math.max(1, ...rankedTypes.map((type) => typeRankMode === 'total' ? type.minutes : type.average));
   const periodDays = Math.round((+period.end - +period.start) / DAY_MS);
   const rollingWindowLabel = scale === 'week' ? 'ROLLING 12 WEEKS' : scale === 'month' ? 'ROLLING 12 MONTHS' : 'ROLLING 4 QUARTERS';
+  const sleepRhythm = useMemo(() => {
+    const durationFor = (record: SleepRecord) => Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS;
+    const dailyDurations = new Map<string, number[]>();
+    sleepRecords.forEach((record) => {
+      const wakeAt = validDate(record.wakeAt);
+      if (!wakeAt) return;
+      const key = dateKey(wakeAt);
+      dailyDurations.set(key, [...(dailyDurations.get(key) ?? []), durationFor(record)]);
+    });
+    return sleepRecords
+      .filter((record) => inPeriod(record.wakeAt, period))
+      .sort((a, b) => +new Date(a.wakeAt) - +new Date(b.wakeAt))
+      .map((record) => {
+        const wakeDay = new Date(record.wakeAt);
+        wakeDay.setHours(0, 0, 0, 0);
+        const rollingDays = Array.from({ length: 7 }, (_, index) => {
+          const day = new Date(wakeDay);
+          day.setDate(wakeDay.getDate() - index);
+          const durations = dailyDurations.get(dateKey(day)) ?? [];
+          return durations.length ? durations.reduce((sum, duration) => sum + duration, 0) / durations.length : null;
+        }).filter((duration): duration is number => duration !== null);
+        return {
+          record,
+          minutes: durationFor(record),
+          sma7: rollingDays.reduce((sum, duration) => sum + duration, 0) / rollingDays.length,
+        };
+      });
+  }, [period, sleepRecords]);
+  const sleepRhythmKey = sleepRhythm.map(({ record }) => record.id).join('|');
+  const activeSleepSmaGeometry = sleepSmaGeometry?.sourceKey === sleepRhythmKey ? sleepSmaGeometry : null;
+  const sleepSmaPointList = activeSleepSmaGeometry?.points.map((point) => `${point.x},${point.y}`).join(' ') ?? '';
 
   const selectScale = (nextScale: DashboardCampaignScale) => {
     onCampaignWindowChange(nextScale, '');
@@ -520,6 +553,48 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   }, [factionTimeMode]);
 
   useEffect(() => {
+    const strip = sleepRhythmRef.current;
+    if (!strip || !sleepRhythm.length) {
+      setSleepSmaGeometry(null);
+      return;
+    }
+    let frame = 0;
+    const updateGeometry = () => {
+      const styles = window.getComputedStyle(strip);
+      const left = Number.parseFloat(styles.paddingLeft);
+      const right = Number.parseFloat(styles.paddingRight);
+      const top = Number.parseFloat(styles.paddingTop);
+      const bottom = Number.parseFloat(styles.paddingBottom);
+      const width = strip.clientWidth - left - right;
+      const height = strip.clientHeight - top - bottom;
+      const stripRect = strip.getBoundingClientRect();
+      const bars = Array.from(strip.querySelectorAll<HTMLElement>('.sleep-rhythm-bar'));
+      if (width <= 0 || height <= 0 || bars.length !== sleepRhythm.length) return;
+      const points = bars.map((bar, index) => {
+        const rhythm = sleepRhythm[index];
+        const rect = bar.getBoundingClientRect();
+        return {
+          id: rhythm.record.id,
+          x: rect.left - stripRect.left - left + rect.width / 2,
+          y: height * (1 - Math.min(1, rhythm.sma7 / (10 * 60))),
+        };
+      });
+      setSleepSmaGeometry({ sourceKey: sleepRhythmKey, left, top, width, height, points });
+    };
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(updateGeometry);
+    };
+    const observer = new ResizeObserver(scheduleUpdate);
+    observer.observe(strip);
+    scheduleUpdate();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [sleepRhythm, sleepRhythmKey]);
+
+  useEffect(() => {
     if (!periodMenuOpen) return;
     const closeOnPointerDown = (event: PointerEvent) => {
       if (!periodSelectorRef.current?.contains(event.target as Node)) setPeriodMenuOpen(false);
@@ -537,7 +612,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
 
   return <section className="life-dashboard" aria-label="长期生活战绩 Dashboard">
     <header className="campaign-header">
-      <div className="campaign-title"><span>00 / LIFE PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong><span aria-hidden="true">·</span><span className="campaign-brand-status">Sword Art Online <i aria-label="系统在线"><b aria-hidden="true" />LINK ACTIVE</i></span></p></div>
+      <div className="campaign-title"><span>00 / LIFE PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong><span aria-hidden="true">·</span><span className="campaign-brand-status">Sword Art Online <i aria-label="社交链路在线"><span className="campaign-online-mark" aria-hidden="true"><b /><b /><b /><em /></span><span className="campaign-online-copy" aria-hidden="true"><small>SOCIAL LINK</small><b>ONLINE</b></span><u aria-hidden="true">{'///'}</u></i></span></p></div>
       <div className="campaign-scale" role="group" aria-label="选择战役时间维度">{(Object.entries(SCALE_META) as [DashboardCampaignScale, typeof SCALE_META[DashboardCampaignScale]][]).map(([key, meta]) => <button type="button" key={key} className={`campaign-scale-${key}`} aria-pressed={scale === key} onClick={() => selectScale(key)}><strong>{meta.title}</strong><span>{meta.subtitle}</span></button>)}</div>
       <div className="period-selector" ref={periodSelectorRef}>
         <span>SELECT CAMPAIGN / 选择战役</span>
@@ -579,10 +654,10 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       <section className="recovery-panel">
         <header><div><span>04 / REST ARCHIVE</span><h3>RECOVERY RHYTHM</h3></div></header>
         <div className="recovery-score"><article><span>SLEEP AVG</span><strong>{metrics.sleepAverage === null ? '--' : formatDuration(metrics.sleepAverage)}</strong><small>{metrics.sleepCount} NIGHT RECORDS</small></article><article><span>ACTIVE DAYS</span><strong>{metrics.activeDays}<i>/{periodDays}</i></strong><small>{period.label}</small></article></div>
-        <div className="sleep-rhythm-strip">{sleepRecords.filter((record) => inPeriod(record.wakeAt, period)).sort((a, b) => +new Date(a.wakeAt) - +new Date(b.wakeAt)).map((record) => {
-          const minutes = Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS;
-          return <i key={record.id} style={{ height: `${Math.min(100, minutes / (10 * 60) * 100)}%` }} data-tooltip={`${dateKey(new Date(record.wakeAt))}｜睡眠 ${formatDuration(minutes)}`} />;
-        })}</div>
+        <div className="sleep-rhythm-strip" ref={sleepRhythmRef}>
+          {sleepRhythm.map(({ record, minutes, sma7 }) => <i className="sleep-rhythm-bar" key={record.id} style={{ height: `${Math.min(100, minutes / (10 * 60) * 100)}%` }} data-tooltip={`${dateKey(new Date(record.wakeAt))}｜睡眠 ${formatDuration(minutes)}｜7D SMA ${formatDuration(sma7)}`} />)}
+          {activeSleepSmaGeometry && <><svg className="sleep-sma-overlay" style={{ left: activeSleepSmaGeometry.left, top: activeSleepSmaGeometry.top, width: activeSleepSmaGeometry.width, height: activeSleepSmaGeometry.height }} viewBox={`0 0 ${activeSleepSmaGeometry.width} ${activeSleepSmaGeometry.height}`} preserveAspectRatio="none" role="img" aria-label="睡眠时长 7 天简单移动平均">{activeSleepSmaGeometry.points.length > 1 && <><polyline className="sleep-sma-keyline" points={sleepSmaPointList} /><polyline className="sleep-sma-signal" points={sleepSmaPointList} /></>}{activeSleepSmaGeometry.points.map((point) => <circle key={point.id} cx={point.x} cy={point.y} r="3" />)}</svg><span className="sleep-sma-label" aria-hidden="true">7D SMA</span></>}
+        </div>
         <footer><span>ZERO</span><strong>REST RECORDS / 睡眠时长分布</strong><span>10H+</span></footer>
       </section>
       </div>
