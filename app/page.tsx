@@ -6,6 +6,7 @@ import { LifeDashboard, type DashboardCampaignScale, type DashboardTask } from '
 import { loadDeadlineEvents, type DeadlineEvent } from './lib/deadline-store';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
+import { loadTaskDeletionEvents, type TaskDeletionEvent } from './lib/task-deletion-store';
 
 type Status = 'pending' | 'inProgress' | 'completed';
 type Priority = 'must' | 'high' | 'medium' | 'low';
@@ -1206,6 +1207,7 @@ export default function Home() {
   const [selectedWorkshopLocation, setSelectedWorkshopLocation] = useState('');
   const [sleepRecords, setSleepRecords] = useState<SleepRecord[]>([]);
   const [deadlineEvents, setDeadlineEvents] = useState<DeadlineEvent[]>([]);
+  const [taskDeletionEvents, setTaskDeletionEvents] = useState<TaskDeletionEvent[]>([]);
   const [sleepLoading, setSleepLoading] = useState(true);
   const [sleepSubmitting, setSleepSubmitting] = useState(false);
   const [sleepStartedAt, setSleepStartedAt] = useState(() => localDateTimeInputValue(new Date(Date.now() - 8 * 60 * 60_000).toISOString()));
@@ -1390,10 +1392,16 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    void loadDeadlineEvents().then((events) => {
-      if (!cancelled) setDeadlineEvents(events);
+    void Promise.all([loadDeadlineEvents(), loadTaskDeletionEvents()]).then(([deadlineHistory, deletionHistory]) => {
+      if (!cancelled) {
+        setDeadlineEvents(deadlineHistory);
+        setTaskDeletionEvents(deletionHistory);
+      }
     }).catch(() => {
-      if (!cancelled) setDeadlineEvents([]);
+      if (!cancelled) {
+        setDeadlineEvents([]);
+        setTaskDeletionEvents([]);
+      }
     });
     return () => { cancelled = true; };
   }, []);
@@ -1423,7 +1431,10 @@ export default function Home() {
             return;
           }
           lastPersistedSnapshot.current = snapshot;
-          void loadDeadlineEvents().then(setDeadlineEvents).catch(() => undefined);
+          void Promise.all([loadDeadlineEvents(), loadTaskDeletionEvents()]).then(([deadlineHistory, deletionHistory]) => {
+            setDeadlineEvents(deadlineHistory);
+            setTaskDeletionEvents(deletionHistory);
+          }).catch(() => undefined);
         } catch {
           setToast('DATABASE OFFLINE · 修改尚未保存，正在等待重试');
           window.setTimeout(() => setSaveRetry((current) => current + 1), 1_500);
@@ -1911,6 +1922,7 @@ export default function Home() {
       tasks={dashboardTasks}
       sleepRecords={sleepRecords}
       deadlineEvents={deadlineEvents}
+      taskDeletionEvents={taskDeletionEvents}
       campaignScale={dashboardScale}
       selectedPeriodId={dashboardPeriodId}
       onCampaignWindowChange={(nextScale, nextPeriodId) => {

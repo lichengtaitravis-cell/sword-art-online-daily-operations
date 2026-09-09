@@ -71,6 +71,20 @@ db.exec(`
     priority_at_change TEXT NOT NULL CHECK (priority_at_change IN ('must', 'high', 'medium', 'low'))
   );
 
+  CREATE TABLE IF NOT EXISTS task_deletion_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'inProgress', 'completed')),
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    priority TEXT NOT NULL CHECK (priority IN ('must', 'high', 'medium', 'low')),
+    payload_json TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tasks_status_manual_order
   ON tasks(status, manual_order);
 
@@ -83,6 +97,9 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_deadline_events_task_changed_at
   ON deadline_events(task_id, changed_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_task_deletion_events_deleted_at
+  ON task_deletion_events(deleted_at DESC);
 `);
 db.exec('PRAGMA optimize');
 
@@ -122,6 +139,17 @@ const readDeadlineEvents = db.prepare(`
 const insertDeadlineEvent = db.prepare(`
   INSERT INTO deadline_events (task_id, changed_at, old_due_at, new_due_at, priority_at_change)
   VALUES (?, ?, ?, ?, ?)
+`);
+const readTaskDeletionEvents = db.prepare(`
+  SELECT id, task_id, deleted_at, title, task_type, status, started_at, completed_at, due_at, priority
+  FROM task_deletion_events
+  ORDER BY deleted_at DESC, id DESC
+`);
+const insertTaskDeletionEvent = db.prepare(`
+  INSERT INTO task_deletion_events (
+    task_id, deleted_at, title, task_type, status, started_at,
+    completed_at, due_at, priority, payload_json
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 function getMeta(key, fallback) {
@@ -182,6 +210,23 @@ function saveState(payload) {
     }
 
     if (wasInitialized) {
+      const incomingTaskIds = new Set(payload.tasks.map((task) => task.id));
+      for (const previous of previousTasks.values()) {
+        if (!incomingTaskIds.has(previous.id) && !previous.isRecurrenceTemplate) {
+          insertTaskDeletionEvent.run(
+            previous.id,
+            now,
+            String(previous.title ?? ''),
+            String(previous.taskType ?? ''),
+            previous.status,
+            String(previous.startedAt ?? ''),
+            String(previous.completedAt ?? ''),
+            String(previous.dueAt ?? ''),
+            previous.priority,
+            JSON.stringify(previous),
+          );
+        }
+      }
       for (const task of payload.tasks) {
         const previous = previousTasks.get(task.id);
         const oldDueAt = String(previous?.dueAt ?? '');
@@ -249,6 +294,21 @@ function getDeadlineEvents() {
   }));
 }
 
+function getTaskDeletionEvents() {
+  return readTaskDeletionEvents.all().map((event) => ({
+    id: Number(event.id),
+    taskId: event.task_id,
+    deletedAt: event.deleted_at,
+    title: event.title,
+    taskType: event.task_type,
+    status: event.status,
+    startedAt: event.started_at,
+    completedAt: event.completed_at,
+    dueAt: event.due_at,
+    priority: event.priority,
+  }));
+}
+
 function createSleepRecord(payload) {
   if (!payload || typeof payload !== 'object') throw new Error('Sleep record payload must be an object');
   const id = typeof payload.id === 'string' && payload.id ? payload.id : crypto.randomUUID();
@@ -311,6 +371,9 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'GET' && request.url === '/v1/deadline-events') {
       return sendJson(response, 200, getDeadlineEvents(), origin);
+    }
+    if (request.method === 'GET' && request.url === '/v1/task-deletions') {
+      return sendJson(response, 200, getTaskDeletionEvents(), origin);
     }
     if (request.method === 'POST' && request.url === '/v1/sleep-records') {
       return sendJson(response, 201, createSleepRecord(await readJson(request)), origin);

@@ -18,10 +18,13 @@ The API accepts requests only from HTTP origins on `localhost` or `127.0.0.1`. I
 - `app_meta`: database initialization, theme, revision, and update timestamp.
 - `migration_backups`: immutable JSON snapshots captured during an explicit browser-storage import.
 - `deadline_events`: immutable audit events captured when an existing deadline on a Must task is changed or cleared. Initial deadline assignment is not a change.
+- `task_deletion_events`: immutable task snapshots captured when a persisted non-template task disappears from a successful state write. These records power cancellation statistics; deletion history from before this table existed cannot be reconstructed.
 
 Writes replace the complete planner state inside one `BEGIN IMMEDIATE` transaction. A monotonically increasing revision rejects stale writes from another tab. WAL mode and `synchronous = FULL` are enabled for local durability.
 
 Deadline events are detected inside that same transaction by comparing the previously stored task with the incoming task. Historical changes made before this pipeline existed cannot be reconstructed and are intentionally not backfilled.
+
+Task deletions are detected in the same transaction by comparing persisted task ids with the incoming state. Recurrence templates are excluded because removing a scheduling rule is not the same event as cancelling one generated mission.
 
 ## One-time browser migration
 

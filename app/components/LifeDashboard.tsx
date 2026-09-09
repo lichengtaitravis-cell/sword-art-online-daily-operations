@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { DashboardDrilldown, type DashboardDrilldownData, type DrilldownItem, type DrilldownTone } from './DashboardDrilldown';
 import type { DeadlineEvent } from '../lib/deadline-store';
 import type { SleepRecord } from '../lib/sleep-store';
+import type { TaskDeletionEvent } from '../lib/task-deletion-store';
 
 type DashboardStatus = 'pending' | 'inProgress' | 'completed';
 type DashboardTone = 'purple' | 'blue' | 'green' | 'yellow';
@@ -13,6 +14,7 @@ type TypeRankMode = 'total' | 'average';
 type LoadMode = 'factions' | 'priority';
 type FactionTimeMode = 'merged' | 'stacked';
 type GraceMinutes = 0 | 30 | 60;
+type OverviewMetricId = 'total' | 'busy' | 'tracked' | 'active' | 'learning' | 'fitness' | 'meditation' | 'cancelled';
 
 export type DashboardTask = {
   id: string;
@@ -32,6 +34,7 @@ type LifeDashboardProps = {
   tasks: DashboardTask[];
   sleepRecords: SleepRecord[];
   deadlineEvents: DeadlineEvent[];
+  taskDeletionEvents: TaskDeletionEvent[];
   campaignScale: DashboardCampaignScale;
   selectedPeriodId: string;
   onCampaignWindowChange: (scale: DashboardCampaignScale, periodId: string) => void;
@@ -90,6 +93,9 @@ const GRACE_OPTIONS: { value: GraceMinutes; label: string; detail: string }[] = 
   { value: 30, label: '30M', detail: '30 MIN' },
   { value: 60, label: '1H', detail: '1 HOUR' },
 ];
+const LEARNING_TYPE_PATTERN = /学业|学习|复习|考试|阅读|证书|课程/;
+const FITNESS_TYPE_PATTERN = /运动|健身|跑步|锻炼|训练/;
+const MEDITATION_TYPE_PATTERN = /冥想|正念/;
 
 function validDate(value: string) {
   if (!value) return null;
@@ -200,6 +206,49 @@ function mergedToneMinutes(tasks: DashboardTask[], tone: DashboardTone, period: 
   return (total + mergedEnd - mergedStart) / MINUTE_MS;
 }
 
+function mergeIntervals(intervals: { start: number; end: number }[]) {
+  if (!intervals.length) return [];
+  const ordered = [...intervals].sort((a, b) => a.start - b.start);
+  const merged = [{ ...ordered[0] }];
+  ordered.slice(1).forEach((interval) => {
+    const previous = merged.at(-1)!;
+    if (interval.start <= previous.end) {
+      previous.end = Math.max(previous.end, interval.end);
+      return;
+    }
+    merged.push({ ...interval });
+  });
+  return merged;
+}
+
+function awakeWindowMetrics(tasks: DashboardTask[], sleepRecords: SleepRecord[], period: CampaignPeriod, now: Date) {
+  const periodEnd = Math.min(+period.end, +now);
+  const sleepStarts = sleepRecords.map((record) => validDate(record.sleepStartedAt)).filter((date): date is Date => Boolean(date)).map(Number).sort((a, b) => a - b);
+  const awakeIntervals = sleepRecords.flatMap((record) => {
+    const wakeAt = validDate(record.wakeAt);
+    if (!wakeAt) return [];
+    const wake = +wakeAt;
+    const nextSleep = sleepStarts.find((sleepStart) => sleepStart > wake);
+    const openCurrentWindow = +now > wake && +now - wake <= 36 * 60 * MINUTE_MS;
+    const rawEnd = nextSleep && nextSleep - wake <= 36 * 60 * MINUTE_MS ? nextSleep : openCurrentWindow ? +now : null;
+    if (!rawEnd) return [];
+    const start = Math.max(wake, +period.start);
+    const end = Math.min(rawEnd, periodEnd);
+    return end > start ? [{ start, end }] : [];
+  });
+  const mergedAwake = mergeIntervals(awakeIntervals);
+  if (!mergedAwake.length) return { awakeMinutes: 0, activeMinutes: 0, busyRate: null, awakeIntervals: mergedAwake };
+  const actionIntervals = mergeIntervals(tasks.map((task) => trackedInterval(task, period, now)).filter((interval): interval is { start: number; end: number } => Boolean(interval)));
+  const awakeMinutes = mergedAwake.reduce((sum, interval) => sum + interval.end - interval.start, 0) / MINUTE_MS;
+  const activeMinutes = actionIntervals.reduce((sum, action) => sum + mergedAwake.reduce((overlap, awake) => overlap + Math.max(0, Math.min(action.end, awake.end) - Math.max(action.start, awake.start)), 0), 0) / MINUTE_MS;
+  return { awakeMinutes, activeMinutes, busyRate: awakeMinutes ? Math.min(100, activeMinutes / awakeMinutes * 100) : null, awakeIntervals: mergedAwake };
+}
+
+function overlapMinutes(interval: { start: number; end: number } | null, windows: { start: number; end: number }[]) {
+  if (!interval) return 0;
+  return windows.reduce((sum, window) => sum + Math.max(0, Math.min(interval.end, window.end) - Math.max(interval.start, window.start)), 0) / MINUTE_MS;
+}
+
 function taskOperationalDate(task: DashboardTask) {
   return validDate(task.dueAt) ?? validDate(task.startedAt) ?? validDate(task.completedAt);
 }
@@ -215,6 +264,10 @@ function formatDuration(minutes: number) {
   const hours = Math.floor(rounded / 60);
   const rest = rounded % 60;
   return hours ? `${hours}h${rest ? ` ${rest}m` : ''}` : `${rest}m`;
+}
+
+function formatWeeklyCount(value: number) {
+  return value === 0 ? '0' : value.toFixed(1);
 }
 
 function formatMoment(value: string) {
@@ -246,7 +299,7 @@ function isInTimeCompletion(task: DashboardTask, graceMinutes: GraceMinutes) {
   return delta <= graceMinutes * MINUTE_MS;
 }
 
-function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: DeadlineEvent[], sleepRecords: SleepRecord[], now: Date, graceMinutes: GraceMinutes) {
+function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: DeadlineEvent[], deletionEvents: TaskDeletionEvent[], sleepRecords: SleepRecord[], now: Date, graceMinutes: GraceMinutes) {
   const periodTasks = tasks.filter((task) => taskBelongsToPeriod(task, period));
   const mustTasks = periodTasks.filter((task) => task.priority === 'must');
   const clears = tasks.filter((task) => inPeriod(task.completedAt, period));
@@ -272,8 +325,46 @@ function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: D
   const sleeps = sleepRecords.filter((record) => inPeriod(record.wakeAt, period));
   const sleepAverage = sleeps.length ? sleeps.reduce((sum, record) => sum + Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS, 0) / sleeps.length : null;
   const activeDays = new Set(sleeps.map((record) => dateKey(new Date(record.wakeAt))));
+  const trackedMinutes = trackedTasks.reduce((sum, task) => sum + intervalMinutes(task, period, now), 0);
+  const learningMinutes = trackedTasks.filter((task) => LEARNING_TYPE_PATTERN.test(task.taskType)).reduce((sum, task) => sum + intervalMinutes(task, period, now), 0);
+  const completedTasks = periodTasks.filter((task) => task.status === 'completed');
+  const completedFitness = completedTasks.filter((task) => FITNESS_TYPE_PATTERN.test(task.taskType)).length;
+  const completedMeditation = completedTasks.filter((task) => MEDITATION_TYPE_PATTERN.test(task.taskType)).length;
+  const cancellations = deletionEvents.filter((event) => inPeriod(event.deletedAt, period));
+  const effectiveEnd = Math.min(+period.end, +now);
+  const elapsedDays = Math.max(1, Math.ceil((effectiveEnd - +period.start) / DAY_MS));
+  const equivalentWeeks = Math.max(1, elapsedDays / 7);
+  const activeMissionDays = new Set<string>();
+  trackedTasks.forEach((task) => {
+    const interval = trackedInterval(task, period, now);
+    if (!interval) return;
+    let cursor = startOfDay(new Date(interval.start));
+    while (+cursor < interval.end) {
+      activeMissionDays.add(dateKey(cursor));
+      cursor = new Date(+cursor + DAY_MS);
+    }
+  });
+  completedTasks.forEach((task) => {
+    const completedAt = validDate(task.completedAt);
+    if (completedAt && inPeriod(task.completedAt, period)) activeMissionDays.add(dateKey(completedAt));
+  });
+  const cancellationPopulation = periodTasks.length + cancellations.length;
+  const awakeMetrics = awakeWindowMetrics(tasks, sleepRecords, period, now);
   return {
     taskCount: periodTasks.length,
+    pendingCount: periodTasks.filter((task) => task.status === 'pending').length,
+    inProgressCount: periodTasks.filter((task) => task.status === 'inProgress').length,
+    completedCount: periodTasks.filter((task) => task.status === 'completed').length,
+    cancellationCount: cancellations.length,
+    cancellationRate: cancellationPopulation ? cancellations.length / cancellationPopulation * 100 : 0,
+    trackedMinutes,
+    ...awakeMetrics,
+    learningWeeklyMinutes: learningMinutes / equivalentWeeks,
+    fitnessWeeklyCount: completedFitness / equivalentWeeks,
+    meditationWeeklyCount: completedMeditation / equivalentWeeks,
+    equivalentWeeks,
+    activeMissionDays: Math.min(elapsedDays, activeMissionDays.size),
+    elapsedDays,
     mustCount: mustTasks.length,
     clearCount: clears.length,
     inTimeRate: deadlineClears.length ? inTimeCount / deadlineClears.length * 100 : null,
@@ -379,7 +470,7 @@ function MetricTrend({ title, values, tone, onPointSelect }: { title: string; va
   </div>;
 }
 
-export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate }: LifeDashboardProps) {
+export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, taskDeletionEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate }: LifeDashboardProps) {
   const [typeRankMode, setTypeRankMode] = useState<TypeRankMode>('total');
   const [loadMode, setLoadMode] = useState<LoadMode>('factions');
   const [factionTimeMode, setFactionTimeMode] = useState<FactionTimeMode>(() => {
@@ -405,16 +496,17 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       ...tasks.flatMap((task) => [taskOperationalDate(task), validDate(task.completedAt)]),
       ...sleepRecords.map((record) => validDate(record.wakeAt)),
       ...deadlineEvents.map((event) => validDate(event.changedAt)),
+      ...taskDeletionEvents.map((event) => validDate(event.deletedAt)),
     ].filter((date): date is Date => Boolean(date && +date <= +now));
     return dates.length ? new Date(Math.min(...dates.map(Number))) : now;
-  }, [deadlineEvents, now, sleepRecords, tasks]);
+  }, [deadlineEvents, now, sleepRecords, taskDeletionEvents, tasks]);
   const periods = useMemo(() => buildPeriods(earliest, now, scale), [earliest, now, scale]);
   const selectedIndex = periods.findIndex((period) => period.id === selectedPeriodId);
   const effectiveIndex = selectedPeriodId && selectedIndex >= 0 ? selectedIndex : periods.length - 1;
   const period = periods[effectiveIndex];
-  const metrics = useMemo(() => periodMetrics(period, tasks, deadlineEvents, sleepRecords, now, graceMinutes), [deadlineEvents, graceMinutes, now, period, sleepRecords, tasks]);
+  const metrics = useMemo(() => periodMetrics(period, tasks, deadlineEvents, taskDeletionEvents, sleepRecords, now, graceMinutes), [deadlineEvents, graceMinutes, now, period, sleepRecords, taskDeletionEvents, tasks]);
   const trendPeriods = periods.slice(Math.max(0, effectiveIndex - SCALE_META[scale].trendCount + 1), effectiveIndex + 1);
-  const trendMetrics = trendPeriods.map((item) => ({ period: item, metrics: periodMetrics(item, tasks, deadlineEvents, sleepRecords, now, graceMinutes) }));
+  const trendMetrics = trendPeriods.map((item) => ({ period: item, metrics: periodMetrics(item, tasks, deadlineEvents, taskDeletionEvents, sleepRecords, now, graceMinutes) }));
   const loadBuckets = buildLoadBuckets(period, scale, tasks);
   const maxLoad = Math.max(1, ...loadBuckets.map((bucket) => bucket.total));
   const mergedFactionMinutes = useMemo(() => TONES.reduce((values, tone) => ({ ...values, [tone]: mergedToneMinutes(tasks, tone, period, now) }), {} as Record<DashboardTone, number>), [now, period, tasks]);
@@ -425,6 +517,16 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   const periodDays = Math.round((+period.end - +period.start) / DAY_MS);
   const rollingWindowLabel = scale === 'week' ? 'ROLLING 12 WEEKS' : scale === 'month' ? 'ROLLING 12 MONTHS' : 'ROLLING 4 QUARTERS';
   const graceLabel = GRACE_OPTIONS.find((option) => option.value === graceMinutes)?.label ?? '1H';
+  const overviewStats: { id: OverviewMetricId; code: string; label: string; value: string; unit: string; note: string; tone: string }[] = [
+    { id: 'total', code: 'MISSION TOTAL', label: '区间总任务数', value: String(metrics.taskCount), unit: '', note: `待办 ${metrics.pendingCount} · 进行 ${metrics.inProgressCount} · 完成 ${metrics.completedCount}`, tone: 'signal' },
+    { id: 'busy', code: 'BUSY INDEX', label: '忙碌指数', value: metrics.busyRate === null ? '--' : metrics.busyRate.toFixed(1), unit: metrics.busyRate === null ? '' : '%', note: metrics.busyRate === null ? '清醒窗口记录不足' : '基于已记录清醒窗口', tone: 'green' },
+    { id: 'tracked', code: 'ACTION TIME', label: '区间总行动时长', value: formatDuration(metrics.trackedMinutes), unit: '', note: '任务行动时长累计', tone: 'purple' },
+    { id: 'active', code: 'ACTIVE DAYS', label: '任务活跃天数', value: String(metrics.activeMissionDays), unit: `/${metrics.elapsedDays}`, note: '有行动或完成记录', tone: 'blue' },
+    { id: 'learning', code: 'STUDY / WEEK', label: '平均周学习时长', value: formatDuration(metrics.learningWeeklyMinutes), unit: '', note: `按 ${metrics.equivalentWeeks.toFixed(1)} 周折算`, tone: 'purple' },
+    { id: 'fitness', code: 'FITNESS / WEEK', label: '平均周健身次数', value: formatWeeklyCount(metrics.fitnessWeeklyCount), unit: '次', note: '仅计已完成运动任务', tone: 'yellow' },
+    { id: 'meditation', code: 'MEDITATE / WEEK', label: '平均周冥想次数', value: formatWeeklyCount(metrics.meditationWeeklyCount), unit: '次', note: '仅计已完成冥想任务', tone: 'blue' },
+    { id: 'cancelled', code: 'CANCEL RATE', label: '任务取消率', value: metrics.cancellationRate.toFixed(1), unit: '%', note: `${metrics.cancellationCount} 取消 · 升级后记录`, tone: 'red' },
+  ];
   const sleepRhythm = useMemo(() => {
     const durationFor = (record: SleepRecord) => Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS;
     const dailyDurations = new Map<string, number[]>();
@@ -472,11 +574,87 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     value,
     tone,
   });
+  const openOverviewDrilldown = (metricId: OverviewMetricId) => {
+    const periodTasks = tasks.filter((task) => taskBelongsToPeriod(task, period));
+    const cancellations = taskDeletionEvents.filter((event) => inPeriod(event.deletedAt, period));
+    const tracked = tasks.map((task) => ({ task, minutes: intervalMinutes(task, period, now) })).filter((item) => item.minutes > 0).sort((a, b) => b.minutes - a.minutes);
+    const learning = tracked.filter(({ task }) => LEARNING_TYPE_PATTERN.test(task.taskType));
+    const fitness = periodTasks.filter((task) => task.status === 'completed' && FITNESS_TYPE_PATTERN.test(task.taskType));
+    const meditation = periodTasks.filter((task) => task.status === 'completed' && MEDITATION_TYPE_PATTERN.test(task.taskType));
+    const deletionItem = (event: TaskDeletionEvent): DrilldownItem => ({
+      id: `deleted-${event.id}`,
+      title: event.title,
+      meta: `CANCELLED · ${PRIORITY_META[event.priority].label} · ${event.taskType}`,
+      detail: `删除 ${formatMoment(event.deletedAt)} · 删除前状态 ${taskStatusLabel(event.status)}`,
+      value: taskStatusLabel(event.status),
+      tone: 'red',
+    });
+    const open = (data: DashboardDrilldownData) => setDrilldown(data);
+    if (metricId === 'total') {
+      const statusGroups: DashboardStatus[] = ['pending', 'inProgress', 'completed'];
+      open({
+        index: 'V01', title: 'MISSION TOTAL', periodLabel: period.label, metric: String(metrics.taskCount), metricLabel: 'CURRENT MISSION RECORDS',
+        formula: 'COUNT OF CURRENT MISSIONS WHOSE OPERATIONAL DATE FALLS INSIDE THIS CAMPAIGN · CANCELLATIONS EXCLUDED', accent: 'yellow',
+        groups: statusGroups.map((status) => ({ id: status, label: `${taskStatusLabel(status)} / ${status === 'pending' ? '等待行动' : status === 'inProgress' ? '正在攻略' : '已经完成'}`, countLabel: `${periodTasks.filter((task) => task.status === status).length} MISSIONS`, tone: status === 'completed' ? 'green' : status === 'inProgress' ? 'blue' : 'muted', items: periodTasks.filter((task) => task.status === status).map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
+      });
+      return;
+    }
+    if (metricId === 'busy') {
+      const contributors = tasks.map((task) => ({ task, minutes: overlapMinutes(trackedInterval(task, period, now), metrics.awakeIntervals) })).filter((item) => item.minutes > 0).sort((a, b) => b.minutes - a.minutes);
+      open({
+        index: 'V02', title: 'BUSY INDEX', periodLabel: period.label, metric: metrics.busyRate === null ? '--' : `${metrics.busyRate.toFixed(1)}%`, metricLabel: 'AWAKE WINDOW UTILIZATION',
+        formula: metrics.busyRate === null ? 'INSUFFICIENT SLEEP RECORDS · NO AWAKE WINDOW WAS INFERRED' : `${formatDuration(metrics.activeMinutes)} MERGED ACTION TIME ÷ ${formatDuration(metrics.awakeMinutes)} RECORDED AWAKE TIME · OVERLAPS COUNT ONCE`, accent: 'green',
+        groups: [{ id: 'awake-action', label: 'AWAKE ACTION / 清醒时段行动', countLabel: `${contributors.length} MISSIONS`, tone: 'green', items: contributors.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期清醒窗口内计入 ${formatDuration(minutes)}`)) }],
+      });
+      return;
+    }
+    if (metricId === 'tracked') {
+      open({
+        index: 'V03', title: 'ACTION TIME', periodLabel: period.label, metric: formatDuration(metrics.trackedMinutes), metricLabel: 'STACKED TRACKED TIME',
+        formula: 'SUM OF EACH IN-PROGRESS OR COMPLETED MISSION INTERVAL · CONCURRENT MISSIONS ARE ACCUMULATED SEPARATELY', accent: 'purple',
+        groups: [{ id: 'tracked', label: 'TIME CONTRIBUTORS / 行动时长来源', countLabel: `${tracked.length} MISSIONS`, tone: 'purple', items: tracked.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期计入 ${formatDuration(minutes)}`)) }],
+      });
+      return;
+    }
+    if (metricId === 'active') {
+      open({
+        index: 'V04', title: 'ACTIVE DAYS', periodLabel: period.label, metric: `${metrics.activeMissionDays}/${metrics.elapsedDays}`, metricLabel: 'MISSION-ACTIVE DAYS',
+        formula: 'UNIQUE LOCAL DATES WITH TRACKED ACTION OR A COMPLETION RECORD ÷ ELAPSED CAMPAIGN DAYS', accent: 'blue',
+        groups: [{ id: 'activity', label: 'ACTIVITY SOURCES / 活跃记录来源', countLabel: `${tracked.length} TRACKED MISSIONS`, tone: 'blue', items: tracked.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes))) }],
+      });
+      return;
+    }
+    if (metricId === 'learning') {
+      const total = learning.reduce((sum, item) => sum + item.minutes, 0);
+      open({
+        index: 'V05', title: 'STUDY / WEEK', periodLabel: period.label, metric: formatDuration(metrics.learningWeeklyMinutes), metricLabel: 'AVERAGE WEEKLY STUDY TIME',
+        formula: `${formatDuration(total)} STUDY TIME ÷ ${metrics.equivalentWeeks.toFixed(1)} EQUIVALENT WEEKS · MATCHES 学业/学习/复习/考试/阅读/证书/课程`, accent: 'purple',
+        groups: [{ id: 'study', label: 'STUDY MISSIONS / 学习任务', countLabel: `${learning.length} MISSIONS`, tone: 'purple', items: learning.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes))) }],
+      });
+      return;
+    }
+    if (metricId === 'fitness' || metricId === 'meditation') {
+      const matching = metricId === 'fitness' ? fitness : meditation;
+      const value = metricId === 'fitness' ? metrics.fitnessWeeklyCount : metrics.meditationWeeklyCount;
+      const label = metricId === 'fitness' ? 'FITNESS / WEEK' : 'MEDITATE / WEEK';
+      open({
+        index: metricId === 'fitness' ? 'V06' : 'V07', title: label, periodLabel: period.label, metric: `${formatWeeklyCount(value)}次`, metricLabel: metricId === 'fitness' ? 'AVERAGE WEEKLY FITNESS' : 'AVERAGE WEEKLY MEDITATION',
+        formula: `${matching.length} COMPLETED MISSIONS ÷ ${metrics.equivalentWeeks.toFixed(1)} EQUIVALENT WEEKS · ONLY COMPLETED MATCHING TYPES COUNT`, accent: metricId === 'fitness' ? 'yellow' : 'blue',
+        groups: [{ id: metricId, label: metricId === 'fitness' ? 'FITNESS CLEARS / 已完成运动' : 'MEDITATION CLEARS / 已完成冥想', countLabel: `${matching.length} MISSIONS`, tone: metricId === 'fitness' ? 'yellow' : 'blue', items: matching.map((task) => makeTaskItem(task, 'CLEARED', `完成 ${formatMoment(task.completedAt)}`, metricId === 'fitness' ? 'yellow' : 'blue')) }],
+      });
+      return;
+    }
+    open({
+      index: 'V08', title: 'CANCELLATION RATE', periodLabel: period.label, metric: `${metrics.cancellationRate.toFixed(1)}%`, metricLabel: 'TASK CANCELLATION RATE',
+      formula: `${metrics.cancellationCount} CANCELLATIONS ÷ (${metrics.taskCount} CURRENT MISSIONS + ${metrics.cancellationCount} CANCELLATIONS) · TRACKING STARTS WITH THIS UPGRADE`, accent: 'orange',
+      groups: [{ id: 'cancelled', label: 'CANCELLED / 取消留痕', countLabel: `${cancellations.length} MISSIONS`, tone: 'red', items: cancellations.map(deletionItem) }],
+    });
+  };
   const openInTimeDrilldown = (targetPeriod: CampaignPeriod) => {
     const deadlineClears = tasks.filter((task) => inPeriod(task.completedAt, targetPeriod) && validDate(task.dueAt));
     const inTime = deadlineClears.filter((task) => isInTimeCompletion(task, graceMinutes));
     const late = deadlineClears.filter((task) => !isInTimeCompletion(task, graceMinutes));
-    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now, graceMinutes);
+    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, taskDeletionEvents, sleepRecords, now, graceMinutes);
     const deadlineItem = (task: DashboardTask) => {
       const delta = completionDeadlineDelta(task) ?? 0;
       const isInTime = isInTimeCompletion(task, graceMinutes);
@@ -504,7 +682,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     periodEvents.forEach((event) => eventsByTask.set(event.taskId, [...(eventsByTask.get(event.taskId) ?? []), event]));
     const changed = mustTasks.filter((task) => eventsByTask.has(task.id));
     const unchanged = mustTasks.filter((task) => !eventsByTask.has(task.id));
-    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now, graceMinutes);
+    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, taskDeletionEvents, sleepRecords, now, graceMinutes);
     const changedItem = (task: DashboardTask) => {
       const events = eventsByTask.get(task.id) ?? [];
       const history = events.sort((a, b) => +new Date(a.changedAt) - +new Date(b.changedAt)).map((event) => `${formatMoment(event.changedAt)}｜${formatMoment(event.oldDueAt)} → ${formatMoment(event.newDueAt)}`).join(' · ');
@@ -656,6 +834,21 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
         <small>{rollingWindowLabel}</small>
       </div>
     </header>
+
+    <section className="campaign-overview" aria-labelledby="campaign-overview-title">
+      <header>
+        <div><span>FIELD SNAPSHOT / 战役总览</span><h3 id="campaign-overview-title">CAMPAIGN VITALS</h3></div>
+        <p>{period.compactLabel}<strong>08 READOUTS</strong></p>
+      </header>
+      <div className="campaign-overview-grid">
+        {overviewStats.map((stat, index) => <article key={stat.id} className={`overview-stat overview-${stat.tone}`} role="button" tabIndex={0} data-index={String(index + 1).padStart(2, '0')} aria-label={`查看${stat.label}明细`} onClick={() => openOverviewDrilldown(stat.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openOverviewDrilldown(stat.id); } }}>
+          <span><i>{String(index + 1).padStart(2, '0')}</i>{stat.code}</span>
+          <strong>{stat.value}<small>{stat.unit}</small></strong>
+          <p>{stat.label}</p>
+          <small>{stat.note}</small>
+        </article>)}
+      </div>
+    </section>
 
     <section className="discipline-arena">
       <article className="discipline-kpi in-time-kpi">
