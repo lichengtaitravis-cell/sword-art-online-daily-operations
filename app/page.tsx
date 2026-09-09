@@ -1805,12 +1805,12 @@ export default function Home() {
     setSelectedWorkshopLocation('');
     setToast('地点已添加');
   };
-  const navigateTo = (nextView: View) => {
+  const navigateTo = (nextView: View, onArrive?: () => void) => {
     setDayAgendaOpen(false);
     setDraft(null);
     setChoiceField(null);
     setDateField(null);
-    if (nextView === view) { closeMenu(); return; }
+    if (nextView === view) { closeMenu(); onArrive?.(); return; }
     const currentIndex = navItems.findIndex((item) => item.id === view);
     const nextIndex = navItems.findIndex((item) => item.id === nextView);
     setPageDirection(nextIndex > currentIndex ? 'forward' : 'backward');
@@ -1819,8 +1819,16 @@ export default function Home() {
     window.setTimeout(() => {
       setView(nextView);
       setPageMotion('enter');
+      onArrive?.();
       window.setTimeout(() => setPageMotion('idle'), 520);
     }, 420);
+  };
+  const openCalendarDay = (dayKey: string) => {
+    const [year, month] = dayKey.split('-').map(Number);
+    setCalendarMonth(new Date(year, month - 1, 1));
+    setSelectedDay(dayKey);
+    setLinkedScheduleTaskId('');
+    navigateTo('calendar', () => setDayAgendaOpen(true));
   };
   const now = clock;
   const todayActionTasks = missionTasks.filter((task) => taskOccursInActionDay(task, localDateKey(now), now));
@@ -1930,6 +1938,7 @@ export default function Home() {
         setDashboardPeriodId(nextPeriodId);
       }}
       onNavigate={(nextView) => navigateTo(nextView)}
+      onOpenCalendarDay={openCalendarDay}
     />}
 
     {view === 'board' && <div className="board-control-rack">

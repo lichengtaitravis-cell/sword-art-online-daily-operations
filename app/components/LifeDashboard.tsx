@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { DashboardDrilldown, type DashboardDrilldownData, type DrilldownItem, type DrilldownTone } from './DashboardDrilldown';
+import { DashboardCalendarDrilldown, type OverviewCalendarDay, type OverviewCalendarDrilldownData, type OverviewCalendarPanel } from './DashboardCalendarDrilldown';
 import type { DeadlineEvent } from '../lib/deadline-store';
 import type { SleepRecord } from '../lib/sleep-store';
 import type { TaskDeletionEvent } from '../lib/task-deletion-store';
@@ -39,6 +40,7 @@ type LifeDashboardProps = {
   selectedPeriodId: string;
   onCampaignWindowChange: (scale: DashboardCampaignScale, periodId: string) => void;
   onNavigate: (view: 'board' | 'table' | 'calendar' | 'sleep') => void;
+  onOpenCalendarDay: (dayKey: string) => void;
 };
 
 type CampaignPeriod = {
@@ -244,11 +246,6 @@ function awakeWindowMetrics(tasks: DashboardTask[], sleepRecords: SleepRecord[],
   return { awakeMinutes, activeMinutes, busyRate: awakeMinutes ? Math.min(100, activeMinutes / awakeMinutes * 100) : null, awakeIntervals: mergedAwake };
 }
 
-function overlapMinutes(interval: { start: number; end: number } | null, windows: { start: number; end: number }[]) {
-  if (!interval) return 0;
-  return windows.reduce((sum, window) => sum + Math.max(0, Math.min(interval.end, window.end) - Math.max(interval.start, window.start)), 0) / MINUTE_MS;
-}
-
 function taskOperationalDate(task: DashboardTask) {
   return validDate(task.dueAt) ?? validDate(task.startedAt) ?? validDate(task.completedAt);
 }
@@ -327,7 +324,7 @@ function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: D
   const activeDays = new Set(sleeps.map((record) => dateKey(new Date(record.wakeAt))));
   const trackedMinutes = trackedTasks.reduce((sum, task) => sum + intervalMinutes(task, period, now), 0);
   const learningMinutes = trackedTasks.filter((task) => LEARNING_TYPE_PATTERN.test(task.taskType)).reduce((sum, task) => sum + intervalMinutes(task, period, now), 0);
-  const completedTasks = periodTasks.filter((task) => task.status === 'completed');
+  const completedTasks = tasks.filter((task) => inPeriod(task.completedAt, period));
   const completedFitness = completedTasks.filter((task) => FITNESS_TYPE_PATTERN.test(task.taskType)).length;
   const completedMeditation = completedTasks.filter((task) => MEDITATION_TYPE_PATTERN.test(task.taskType)).length;
   const cancellations = deletionEvents.filter((event) => inPeriod(event.deletedAt, period));
@@ -470,7 +467,7 @@ function MetricTrend({ title, values, tone, onPointSelect }: { title: string; va
   </div>;
 }
 
-export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, taskDeletionEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate }: LifeDashboardProps) {
+export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, taskDeletionEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate, onOpenCalendarDay }: LifeDashboardProps) {
   const [typeRankMode, setTypeRankMode] = useState<TypeRankMode>('total');
   const [loadMode, setLoadMode] = useState<LoadMode>('factions');
   const [factionTimeMode, setFactionTimeMode] = useState<FactionTimeMode>(() => {
@@ -487,6 +484,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     return 60;
   });
   const [drilldown, setDrilldown] = useState<DashboardDrilldownData | null>(null);
+  const [overviewDrilldown, setOverviewDrilldown] = useState<OverviewMetricId | null>(null);
   const [sleepSmaGeometry, setSleepSmaGeometry] = useState<{ sourceKey: string; left: number; top: number; width: number; height: number; points: { id: string; x: number; y: number }[] } | null>(null);
   const periodSelectorRef = useRef<HTMLDivElement>(null);
   const graceFilterRef = useRef<HTMLDivElement>(null);
@@ -527,6 +525,131 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     { id: 'meditation', code: 'MEDITATE / WEEK', label: '平均周冥想次数', value: formatWeeklyCount(metrics.meditationWeeklyCount), unit: '次', note: '仅计已完成冥想任务', tone: 'blue' },
     { id: 'cancelled', code: 'CANCEL RATE', label: '任务取消率', value: metrics.cancellationRate.toFixed(1), unit: '%', note: `${metrics.cancellationCount} 取消 · 升级后记录`, tone: 'red' },
   ];
+  const overviewCalendarData = (() => {
+    if (!overviewDrilldown) return null;
+    const stat = overviewStats.find((item) => item.id === overviewDrilldown)!;
+    const config: Record<OverviewMetricId, { index: string; title: string; metricLabel: string; formula: string; accent: OverviewCalendarDrilldownData['accent']; trendTitle?: string }> = {
+      total: { index: 'V01', title: 'MISSION TOTAL', metricLabel: 'CURRENT MISSION RECORDS', formula: 'DAILY COUNT BY OPERATIONAL DATE · CANCELLATIONS EXCLUDED', accent: 'yellow', trendTitle: 'DAILY MISSION COUNT' },
+      busy: { index: 'V02', title: 'BUSY INDEX', metricLabel: 'AWAKE WINDOW UTILIZATION', formula: 'DAILY MERGED ACTION TIME ÷ RECORDED WAKE-TO-SLEEP TIME · OVERLAPS COUNT ONCE', accent: 'green', trendTitle: 'DAILY BUSY INDEX' },
+      tracked: { index: 'V03', title: 'ACTION TIME', metricLabel: 'STACKED TRACKED TIME', formula: 'DAILY SUM OF IN-PROGRESS AND COMPLETED MISSION INTERVALS · CONCURRENT MISSIONS STACK', accent: 'purple', trendTitle: 'DAILY ACTION TIME' },
+      active: { index: 'V04', title: 'ACTIVE DAYS', metricLabel: 'MISSION-ACTIVE DAYS', formula: 'PIN = AT LEAST ONE TRACKED ACTION OR COMPLETION RECORD ON THAT LOCAL DATE', accent: 'blue' },
+      learning: { index: 'V05', title: 'STUDY / WEEK', metricLabel: 'AVERAGE WEEKLY STUDY TIME', formula: `DAILY TRACKED TIME FOR 学业/学习/复习/考试/阅读/证书/课程 · PERIOD TOTAL ÷ ${metrics.equivalentWeeks.toFixed(1)} WEEKS`, accent: 'purple', trendTitle: 'DAILY STUDY TIME' },
+      fitness: { index: 'V06', title: 'FITNESS / WEEK', metricLabel: 'AVERAGE WEEKLY FITNESS', formula: 'CHECK = ONE OR MORE FITNESS MISSIONS COMPLETED ON THAT LOCAL DATE', accent: 'yellow' },
+      meditation: { index: 'V07', title: 'MEDITATE / WEEK', metricLabel: 'AVERAGE WEEKLY MEDITATION', formula: 'CHECK = ONE OR MORE MEDITATION MISSIONS COMPLETED ON THAT LOCAL DATE', accent: 'blue' },
+      cancelled: { index: 'V08', title: 'CANCELLATION RATE', metricLabel: 'TASK CANCELLATION RATE', formula: 'DAILY CANCELLATION COUNT · ZERO STAYS BLANK · AUDIT STARTS WITH THIS UPGRADE', accent: 'orange' },
+    };
+    const selectedConfig = config[overviewDrilldown];
+    const buildDayRecord = (sourceDate: Date, selected: boolean, panelMonth: number) => {
+      const start = startOfDay(sourceDate);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      const dayPeriod: CampaignPeriod = { id: dateKey(start), start, end, label: dateKey(start), compactLabel: `${start.getMonth() + 1}/${start.getDate()}` };
+      const future = +start > +now;
+      const dayTasks = tasks.filter((task) => taskBelongsToPeriod(task, dayPeriod));
+      const dayCompletions = tasks.filter((task) => inPeriod(task.completedAt, dayPeriod));
+      const trackedMinutes = future ? 0 : tasks.reduce((sum, task) => sum + intervalMinutes(task, dayPeriod, now), 0);
+      const learningMinutes = future ? 0 : tasks.filter((task) => LEARNING_TYPE_PATTERN.test(task.taskType)).reduce((sum, task) => sum + intervalMinutes(task, dayPeriod, now), 0);
+      const hasWakeRecord = !future && sleepRecords.some((record) => inPeriod(record.wakeAt, dayPeriod));
+      const awakeMetrics = hasWakeRecord ? awakeWindowMetrics(tasks, sleepRecords, dayPeriod, now) : null;
+      const fitnessCount = dayCompletions.filter((task) => FITNESS_TYPE_PATTERN.test(task.taskType)).length;
+      const meditationCount = dayCompletions.filter((task) => MEDITATION_TYPE_PATTERN.test(task.taskType)).length;
+      const cancellationCount = taskDeletionEvents.filter((event) => inPeriod(event.deletedAt, dayPeriod)).length;
+      const active = !future && (trackedMinutes > 0 || dayCompletions.length > 0);
+      let value = '';
+      let unit = '';
+      let marker: OverviewCalendarDay['marker'];
+      let markerCount = 0;
+      let numericValue: number | null = 0;
+      let detail = dayPeriod.label;
+      if (overviewDrilldown === 'total') {
+        numericValue = dayTasks.length;
+        value = dayTasks.length ? String(dayTasks.length) : '';
+        unit = value ? 'TASKS' : '';
+        detail = `${dayPeriod.label} · ${dayTasks.length} 个任务`;
+      } else if (overviewDrilldown === 'busy') {
+        numericValue = future ? null : awakeMetrics?.busyRate ?? 0;
+        value = numericValue === null || numericValue <= 0 ? '' : numericValue.toFixed(0);
+        unit = value ? '%' : '';
+        detail = future
+          ? `${dayPeriod.label} · 尚未到达`
+          : !hasWakeRecord
+            ? `${dayPeriod.label} · 当日尚无起床记录 · 忙碌指数 0%`
+            : `${dayPeriod.label} · 忙碌指数 ${(numericValue ?? 0).toFixed(1)}% · ${formatDuration(awakeMetrics!.activeMinutes)} 行动 / ${formatDuration(awakeMetrics!.awakeMinutes)} 清醒`;
+      } else if (overviewDrilldown === 'tracked' || overviewDrilldown === 'learning') {
+        numericValue = future ? null : overviewDrilldown === 'tracked' ? trackedMinutes : learningMinutes;
+        value = numericValue === null || numericValue <= 0 ? '' : formatDuration(numericValue);
+        detail = `${dayPeriod.label} · ${overviewDrilldown === 'tracked' ? '行动' : '学习'} ${value || '尚未发生'}`;
+      } else if (overviewDrilldown === 'active') {
+        numericValue = active ? 1 : 0;
+        marker = active ? 'pin' : undefined;
+        detail = `${dayPeriod.label} · ${active ? '任务活跃日' : future ? '尚未到达' : '无任务活动'}`;
+      } else if (overviewDrilldown === 'fitness' || overviewDrilldown === 'meditation') {
+        markerCount = overviewDrilldown === 'fitness' ? fitnessCount : meditationCount;
+        numericValue = markerCount;
+        marker = markerCount ? 'check' : undefined;
+        detail = `${dayPeriod.label} · 完成 ${markerCount} 次${overviewDrilldown === 'fitness' ? '健身' : '冥想'}`;
+      } else {
+        numericValue = cancellationCount;
+        markerCount = cancellationCount;
+        marker = cancellationCount ? 'cancel' : undefined;
+        value = cancellationCount ? String(cancellationCount) : '';
+        unit = cancellationCount ? 'CXL' : '';
+        detail = `${dayPeriod.label} · ${cancellationCount ? `取消 ${cancellationCount} 个任务` : '无任务取消'}`;
+      }
+      return {
+        date: start,
+        numericValue,
+        day: { id: dayPeriod.id, day: start.getDate(), dateLabel: dayPeriod.compactLabel, future, selected, outsideMonth: start.getMonth() !== panelMonth, value, unit, marker, markerCount, detail, intensity: 0 },
+      };
+    };
+    const dailyRecords: ReturnType<typeof buildDayRecord>[] = [];
+    const cursor = new Date(period.start);
+    while (+cursor < +period.end) {
+      dailyRecords.push(buildDayRecord(cursor, true, cursor.getMonth()));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    const maxValue = Math.max(1, ...dailyRecords.map((item) => item.numericValue ?? 0));
+    dailyRecords.forEach((record) => { record.day.intensity = record.numericValue === null ? 0 : record.numericValue / maxValue; });
+    const panelMonthKeys = new Set<string>();
+    dailyRecords.forEach((record) => panelMonthKeys.add(`${record.date.getFullYear()}-${record.date.getMonth()}`));
+    const panels: OverviewCalendarPanel[] = [];
+    panelMonthKeys.forEach((id) => {
+      const [year, month] = id.split('-').map(Number);
+      const monthStart = new Date(year, month, 1);
+      const gridStart = new Date(monthStart);
+      gridStart.setDate(gridStart.getDate() - ((gridStart.getDay() + 6) % 7));
+      const cells = Array.from({ length: 42 }, (_, index) => {
+        const date = new Date(gridStart);
+        date.setDate(date.getDate() + index);
+        const selected = +date >= +period.start && +date < +period.end
+          && date.getFullYear() === year && date.getMonth() === month;
+        const record = buildDayRecord(date, selected, month);
+        record.day.intensity = record.numericValue === null ? 0 : Math.min(1, record.numericValue / maxValue);
+        return record.day;
+      });
+      panels.push({
+        id,
+        label: `${new Intl.DateTimeFormat('en-US', { month: 'short' }).format(monthStart).toUpperCase()} ${year} / ${month + 1}月`,
+        cells,
+      });
+    });
+    const trend = selectedConfig.trendTitle ? {
+      title: selectedConfig.trendTitle,
+      values: dailyRecords.map((record) => ({ id: record.day.id, label: record.day.dateLabel, value: record.numericValue, displayValue: record.day.value ? `${record.day.value}${record.day.unit}` : '—' })),
+    } : undefined;
+    return {
+      index: selectedConfig.index,
+      title: selectedConfig.title,
+      periodLabel: period.label,
+      metric: `${stat.value}${stat.unit}`,
+      metricLabel: selectedConfig.metricLabel,
+      formula: selectedConfig.formula,
+      accent: selectedConfig.accent,
+      scale,
+      panels,
+      trend,
+    } satisfies OverviewCalendarDrilldownData;
+  })();
   const sleepRhythm = useMemo(() => {
     const durationFor = (record: SleepRecord) => Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS;
     const dailyDurations = new Map<string, number[]>();
@@ -574,82 +697,6 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     value,
     tone,
   });
-  const openOverviewDrilldown = (metricId: OverviewMetricId) => {
-    const periodTasks = tasks.filter((task) => taskBelongsToPeriod(task, period));
-    const cancellations = taskDeletionEvents.filter((event) => inPeriod(event.deletedAt, period));
-    const tracked = tasks.map((task) => ({ task, minutes: intervalMinutes(task, period, now) })).filter((item) => item.minutes > 0).sort((a, b) => b.minutes - a.minutes);
-    const learning = tracked.filter(({ task }) => LEARNING_TYPE_PATTERN.test(task.taskType));
-    const fitness = periodTasks.filter((task) => task.status === 'completed' && FITNESS_TYPE_PATTERN.test(task.taskType));
-    const meditation = periodTasks.filter((task) => task.status === 'completed' && MEDITATION_TYPE_PATTERN.test(task.taskType));
-    const deletionItem = (event: TaskDeletionEvent): DrilldownItem => ({
-      id: `deleted-${event.id}`,
-      title: event.title,
-      meta: `CANCELLED · ${PRIORITY_META[event.priority].label} · ${event.taskType}`,
-      detail: `删除 ${formatMoment(event.deletedAt)} · 删除前状态 ${taskStatusLabel(event.status)}`,
-      value: taskStatusLabel(event.status),
-      tone: 'red',
-    });
-    const open = (data: DashboardDrilldownData) => setDrilldown(data);
-    if (metricId === 'total') {
-      const statusGroups: DashboardStatus[] = ['pending', 'inProgress', 'completed'];
-      open({
-        index: 'V01', title: 'MISSION TOTAL', periodLabel: period.label, metric: String(metrics.taskCount), metricLabel: 'CURRENT MISSION RECORDS',
-        formula: 'COUNT OF CURRENT MISSIONS WHOSE OPERATIONAL DATE FALLS INSIDE THIS CAMPAIGN · CANCELLATIONS EXCLUDED', accent: 'yellow',
-        groups: statusGroups.map((status) => ({ id: status, label: `${taskStatusLabel(status)} / ${status === 'pending' ? '等待行动' : status === 'inProgress' ? '正在攻略' : '已经完成'}`, countLabel: `${periodTasks.filter((task) => task.status === status).length} MISSIONS`, tone: status === 'completed' ? 'green' : status === 'inProgress' ? 'blue' : 'muted', items: periodTasks.filter((task) => task.status === status).map((task) => makeTaskItem(task, taskStatusLabel(task.status))) })),
-      });
-      return;
-    }
-    if (metricId === 'busy') {
-      const contributors = tasks.map((task) => ({ task, minutes: overlapMinutes(trackedInterval(task, period, now), metrics.awakeIntervals) })).filter((item) => item.minutes > 0).sort((a, b) => b.minutes - a.minutes);
-      open({
-        index: 'V02', title: 'BUSY INDEX', periodLabel: period.label, metric: metrics.busyRate === null ? '--' : `${metrics.busyRate.toFixed(1)}%`, metricLabel: 'AWAKE WINDOW UTILIZATION',
-        formula: metrics.busyRate === null ? 'INSUFFICIENT SLEEP RECORDS · NO AWAKE WINDOW WAS INFERRED' : `${formatDuration(metrics.activeMinutes)} MERGED ACTION TIME ÷ ${formatDuration(metrics.awakeMinutes)} RECORDED AWAKE TIME · OVERLAPS COUNT ONCE`, accent: 'green',
-        groups: [{ id: 'awake-action', label: 'AWAKE ACTION / 清醒时段行动', countLabel: `${contributors.length} MISSIONS`, tone: 'green', items: contributors.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期清醒窗口内计入 ${formatDuration(minutes)}`)) }],
-      });
-      return;
-    }
-    if (metricId === 'tracked') {
-      open({
-        index: 'V03', title: 'ACTION TIME', periodLabel: period.label, metric: formatDuration(metrics.trackedMinutes), metricLabel: 'STACKED TRACKED TIME',
-        formula: 'SUM OF EACH IN-PROGRESS OR COMPLETED MISSION INTERVAL · CONCURRENT MISSIONS ARE ACCUMULATED SEPARATELY', accent: 'purple',
-        groups: [{ id: 'tracked', label: 'TIME CONTRIBUTORS / 行动时长来源', countLabel: `${tracked.length} MISSIONS`, tone: 'purple', items: tracked.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes), `本周期计入 ${formatDuration(minutes)}`)) }],
-      });
-      return;
-    }
-    if (metricId === 'active') {
-      open({
-        index: 'V04', title: 'ACTIVE DAYS', periodLabel: period.label, metric: `${metrics.activeMissionDays}/${metrics.elapsedDays}`, metricLabel: 'MISSION-ACTIVE DAYS',
-        formula: 'UNIQUE LOCAL DATES WITH TRACKED ACTION OR A COMPLETION RECORD ÷ ELAPSED CAMPAIGN DAYS', accent: 'blue',
-        groups: [{ id: 'activity', label: 'ACTIVITY SOURCES / 活跃记录来源', countLabel: `${tracked.length} TRACKED MISSIONS`, tone: 'blue', items: tracked.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes))) }],
-      });
-      return;
-    }
-    if (metricId === 'learning') {
-      const total = learning.reduce((sum, item) => sum + item.minutes, 0);
-      open({
-        index: 'V05', title: 'STUDY / WEEK', periodLabel: period.label, metric: formatDuration(metrics.learningWeeklyMinutes), metricLabel: 'AVERAGE WEEKLY STUDY TIME',
-        formula: `${formatDuration(total)} STUDY TIME ÷ ${metrics.equivalentWeeks.toFixed(1)} EQUIVALENT WEEKS · MATCHES 学业/学习/复习/考试/阅读/证书/课程`, accent: 'purple',
-        groups: [{ id: 'study', label: 'STUDY MISSIONS / 学习任务', countLabel: `${learning.length} MISSIONS`, tone: 'purple', items: learning.map(({ task, minutes }) => makeTaskItem(task, formatDuration(minutes))) }],
-      });
-      return;
-    }
-    if (metricId === 'fitness' || metricId === 'meditation') {
-      const matching = metricId === 'fitness' ? fitness : meditation;
-      const value = metricId === 'fitness' ? metrics.fitnessWeeklyCount : metrics.meditationWeeklyCount;
-      const label = metricId === 'fitness' ? 'FITNESS / WEEK' : 'MEDITATE / WEEK';
-      open({
-        index: metricId === 'fitness' ? 'V06' : 'V07', title: label, periodLabel: period.label, metric: `${formatWeeklyCount(value)}次`, metricLabel: metricId === 'fitness' ? 'AVERAGE WEEKLY FITNESS' : 'AVERAGE WEEKLY MEDITATION',
-        formula: `${matching.length} COMPLETED MISSIONS ÷ ${metrics.equivalentWeeks.toFixed(1)} EQUIVALENT WEEKS · ONLY COMPLETED MATCHING TYPES COUNT`, accent: metricId === 'fitness' ? 'yellow' : 'blue',
-        groups: [{ id: metricId, label: metricId === 'fitness' ? 'FITNESS CLEARS / 已完成运动' : 'MEDITATION CLEARS / 已完成冥想', countLabel: `${matching.length} MISSIONS`, tone: metricId === 'fitness' ? 'yellow' : 'blue', items: matching.map((task) => makeTaskItem(task, 'CLEARED', `完成 ${formatMoment(task.completedAt)}`, metricId === 'fitness' ? 'yellow' : 'blue')) }],
-      });
-      return;
-    }
-    open({
-      index: 'V08', title: 'CANCELLATION RATE', periodLabel: period.label, metric: `${metrics.cancellationRate.toFixed(1)}%`, metricLabel: 'TASK CANCELLATION RATE',
-      formula: `${metrics.cancellationCount} CANCELLATIONS ÷ (${metrics.taskCount} CURRENT MISSIONS + ${metrics.cancellationCount} CANCELLATIONS) · TRACKING STARTS WITH THIS UPGRADE`, accent: 'orange',
-      groups: [{ id: 'cancelled', label: 'CANCELLED / 取消留痕', countLabel: `${cancellations.length} MISSIONS`, tone: 'red', items: cancellations.map(deletionItem) }],
-    });
-  };
   const openInTimeDrilldown = (targetPeriod: CampaignPeriod) => {
     const deadlineClears = tasks.filter((task) => inPeriod(task.completedAt, targetPeriod) && validDate(task.dueAt));
     const inTime = deadlineClears.filter((task) => isInTimeCompletion(task, graceMinutes));
@@ -841,7 +888,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
         <p>{period.compactLabel}<strong>08 READOUTS</strong></p>
       </header>
       <div className="campaign-overview-grid">
-        {overviewStats.map((stat, index) => <article key={stat.id} className={`overview-stat overview-${stat.tone}`} role="button" tabIndex={0} data-index={String(index + 1).padStart(2, '0')} aria-label={`查看${stat.label}明细`} onClick={() => openOverviewDrilldown(stat.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openOverviewDrilldown(stat.id); } }}>
+        {overviewStats.map((stat, index) => <article key={stat.id} className={`overview-stat overview-${stat.tone}`} role="button" tabIndex={0} data-index={String(index + 1).padStart(2, '0')} aria-label={`查看${stat.label}日历`} onClick={() => setOverviewDrilldown(stat.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOverviewDrilldown(stat.id); } }}>
           <span><i>{String(index + 1).padStart(2, '0')}</i>{stat.code}</span>
           <strong>{stat.value}<small>{stat.unit}</small></strong>
           <p>{stat.label}</p>
@@ -917,6 +964,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
         <button type="button" onClick={() => onNavigate('calendar')}><span>04</span><div><strong>CALENDAR</strong><small>进入月度行动地图</small></div><i>◆</i></button>
       </nav>
     </div>
+    {overviewCalendarData && <DashboardCalendarDrilldown data={overviewCalendarData} onClose={() => setOverviewDrilldown(null)} onDaySelect={(dayKey) => { setOverviewDrilldown(null); onOpenCalendarDay(dayKey); }} />}
     {drilldown && <DashboardDrilldown data={drilldown} onClose={() => setDrilldown(null)} />}
   </section>;
 }
