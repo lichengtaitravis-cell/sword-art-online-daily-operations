@@ -1035,7 +1035,23 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
       onChange(editorRef.current.innerHTML);
       return;
     }
+    const range = selection?.getRangeAt(0);
+    if (!range || !entry.contains(range.startContainer) || !entry.contains(range.endContainer)) return;
+    // Native list items split at the caret. Extracting the trailing DOM range
+    // keeps inline formatting intact and, when the caret is at the start, moves
+    // the whole line into the new checklist item.
+    range.deleteContents();
+    const trailingRange = document.createRange();
+    trailingRange.selectNodeContents(entry);
+    trailingRange.setStart(range.startContainer, range.startOffset);
+    const trailingContents = trailingRange.extractContents();
+    if (!entry.childNodes.length) entry.textContent = '\u00a0';
     const nextItem = createChecklistItem();
+    const nextEntry = Array.from(nextItem.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
+    if (nextEntry && trailingContents.childNodes.length) {
+      nextEntry.textContent = '';
+      nextEntry.append(trailingContents);
+    }
     item.insertAdjacentElement('afterend', nextItem);
     placeCaretAtChecklistTextStart(nextItem);
     rememberSelection();
