@@ -19,3 +19,31 @@ export async function loadTaskDeletionEvents() {
   if (!response.ok) throw new Error('error' in body ? body.error : `Task deletion request failed (${response.status})`);
   return body as TaskDeletionEvent[];
 }
+
+export async function recordTaskDeletionEvent(task: {
+  id: string;
+  title: string;
+  taskType: string;
+  status: TaskDeletionEvent['status'];
+  startedAt: string;
+  completedAt: string;
+  dueAt: string;
+  priority: TaskDeletionEvent['priority'];
+  isRecurrenceTemplate?: boolean;
+}) {
+  const response = await fetch(TASK_DELETIONS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  });
+  const body = await response.json() as TaskDeletionEvent[] | { error: string };
+  if (!response.ok) throw new Error('error' in body ? body.error : `Task deletion request failed (${response.status})`);
+  return body as TaskDeletionEvent[];
+}
+
+export async function removeTaskDeletionEvent(id: number) {
+  const response = await fetch(`${TASK_DELETIONS_URL}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const body = await response.json() as TaskDeletionEvent[] | { error: string };
+  if (!response.ok) throw new Error('error' in body ? body.error : `Task deletion request failed (${response.status})`);
+  return body as TaskDeletionEvent[];
+}

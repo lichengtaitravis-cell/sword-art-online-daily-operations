@@ -151,6 +151,30 @@ const insertTaskDeletionEvent = db.prepare(`
     completed_at, due_at, priority, payload_json
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+const readTaskDeletionEventByTaskId = db.prepare('SELECT id FROM task_deletion_events WHERE task_id = ? LIMIT 1');
+const deleteTaskDeletionEvent = db.prepare('DELETE FROM task_deletion_events WHERE id = ?');
+
+function recordTaskDeletionEvent(task, deletedAt = new Date().toISOString()) {
+  if (!task || typeof task !== 'object') throw new Error('Task deletion payload must be an object');
+  const taskId = String(task.id ?? task.taskId ?? '');
+  if (!taskId) throw new Error('Task deletion id is required');
+  if (task.isRecurrenceTemplate || readTaskDeletionEventByTaskId.get(taskId)) return false;
+  if (!['pending', 'inProgress', 'completed'].includes(task.status)) throw new Error('Invalid deleted task status');
+  if (!['must', 'high', 'medium', 'low'].includes(task.priority)) throw new Error('Invalid deleted task priority');
+  insertTaskDeletionEvent.run(
+    taskId,
+    deletedAt,
+    String(task.title ?? ''),
+    String(task.taskType ?? ''),
+    task.status,
+    String(task.startedAt ?? ''),
+    String(task.completedAt ?? ''),
+    String(task.dueAt ?? ''),
+    task.priority,
+    JSON.stringify(task),
+  );
+  return true;
+}
 
 function getMeta(key, fallback) {
   return readMeta.get(key)?.value ?? fallback;
@@ -213,18 +237,7 @@ function saveState(payload) {
       const incomingTaskIds = new Set(payload.tasks.map((task) => task.id));
       for (const previous of previousTasks.values()) {
         if (!incomingTaskIds.has(previous.id) && !previous.isRecurrenceTemplate) {
-          insertTaskDeletionEvent.run(
-            previous.id,
-            now,
-            String(previous.title ?? ''),
-            String(previous.taskType ?? ''),
-            previous.status,
-            String(previous.startedAt ?? ''),
-            String(previous.completedAt ?? ''),
-            String(previous.dueAt ?? ''),
-            previous.priority,
-            JSON.stringify(previous),
-          );
+          recordTaskDeletionEvent(previous, now);
         }
       }
       for (const task of payload.tasks) {
@@ -373,6 +386,16 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, getDeadlineEvents(), origin);
     }
     if (request.method === 'GET' && request.url === '/v1/task-deletions') {
+      return sendJson(response, 200, getTaskDeletionEvents(), origin);
+    }
+    if (request.method === 'POST' && request.url === '/v1/task-deletions') {
+      recordTaskDeletionEvent(await readJson(request));
+      return sendJson(response, 201, getTaskDeletionEvents(), origin);
+    }
+    if (request.method === 'DELETE' && request.url?.startsWith('/v1/task-deletions/')) {
+      const id = Number(decodeURIComponent(request.url.slice('/v1/task-deletions/'.length)));
+      if (!Number.isInteger(id) || id <= 0) return sendJson(response, 400, { error: 'Task deletion event id is required' }, origin);
+      deleteTaskDeletionEvent.run(id);
       return sendJson(response, 200, getTaskDeletionEvents(), origin);
     }
     if (request.method === 'POST' && request.url === '/v1/sleep-records') {

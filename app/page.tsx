@@ -6,7 +6,7 @@ import { LifeDashboard, type DashboardCampaignScale, type DashboardTask } from '
 import { loadDeadlineEvents, type DeadlineEvent } from './lib/deadline-store';
 import { loadPlannerState, savePlannerState } from './lib/planner-store';
 import { createSleepRecord, loadSleepRecords, removeSleepRecord, type SleepRecord } from './lib/sleep-store';
-import { loadTaskDeletionEvents, type TaskDeletionEvent } from './lib/task-deletion-store';
+import { loadTaskDeletionEvents, recordTaskDeletionEvent, removeTaskDeletionEvent, type TaskDeletionEvent } from './lib/task-deletion-store';
 
 type Status = 'pending' | 'inProgress' | 'completed';
 type Priority = 'must' | 'high' | 'medium' | 'low';
@@ -78,6 +78,7 @@ const BASE_TYPES: PlannerSettings['taskTypes'] = [
 ];
 const BASE_LOCATIONS = ['🏠 家', '🏢 公司', '🏫 学校', '💻 线上', '🏃 户外', '✈️ 机场', '🚉 车站', '🛒 超市', '📍 其他'].map((value) => ({ value }));
 const DEFAULT_SETTINGS: PlannerSettings = { username: '2DimensionalM', taskTypes: BASE_TYPES, locations: BASE_LOCATIONS, defaultTaskType: '🧬 个人', defaultLocation: '🏠 家', recurrenceEnabled: true, recurrenceOrder: [] };
+const CANCELLATION_LOG_LIMIT = 6;
 const RETIRED_ROUTINE_TYPE = '⏰ 作息';
 const TASK_KEY = 'sao-planner-tasks-v2';
 const LEGACY_TASK_KEY = 'sao-planner-tasks-v1';
@@ -1219,6 +1220,7 @@ export default function Home() {
   const [sleepDisplayMode, setSleepDisplayMode] = useState<SleepDisplayMode>('standard');
   const [sleepStandardExpanded, setSleepStandardExpanded] = useState(false);
   const [repeatersExpanded, setRepeatersExpanded] = useState(true);
+  const [cancellationLogExpanded, setCancellationLogExpanded] = useState(false);
   const [repeaterDraggingId, setRepeaterDraggingId] = useState('');
   const missionTasks = useMemo(() => tasks.filter((task) => !task.isRecurrenceTemplate), [tasks]);
 
@@ -1505,6 +1507,7 @@ export default function Home() {
       return hasManualOrder ? (a.manualOrder ?? Number.MAX_SAFE_INTEGER) - (b.manualOrder ?? Number.MAX_SAFE_INTEGER) : a.index - b.index;
     });
   }, [settings.recurrenceOrder, tasks]);
+  const visibleCancellationEvents = cancellationLogExpanded ? taskDeletionEvents : taskDeletionEvents.slice(0, CANCELLATION_LOG_LIMIT);
 
   const filteredTable = useMemo(() => {
     const query = tableQuery.trim().toLowerCase();
@@ -1656,13 +1659,29 @@ export default function Home() {
     setToast(draft.isRecurrenceTemplate ? '循环模板已保存' : '任务已保存');
   };
 
-  const deleteDraft = () => {
+  const deleteDraft = async () => {
     if (!draft || !tasks.some((task) => task.id === draft.id)) return;
+    if (!draft.isRecurrenceTemplate) {
+      try {
+        setTaskDeletionEvents(await recordTaskDeletionEvent(draft));
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : '任务取消留痕失败');
+        return;
+      }
+    }
     setTasks((current) => draft.isRecurrenceTemplate
       ? current.filter((task) => task.id !== draft.id).map((task) => task.seriesId === draft.seriesId ? { ...task, recurrence: 'none', recurrenceStartTime: '', seriesHead: false } : task)
       : current.filter((task) => task.id !== draft.id));
     setDraft(null);
     setToast(draft.isRecurrenceTemplate ? '循环模板已删除' : '任务已删除');
+  };
+  const removeCancellationEvent = async (id: number) => {
+    try {
+      setTaskDeletionEvents(await removeTaskDeletionEvent(id));
+      setToast('取消留痕已移除');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '取消留痕移除失败');
+    }
   };
 
   const openNewTask = (status: Status = 'pending', dueAt = '') => setDraft({ ...newTask(settings, tasks.reduce((max, task) => Math.max(max, task.index), 0) + 1), status, dueAt });
@@ -1830,6 +1849,9 @@ export default function Home() {
     setLinkedScheduleTaskId('');
     navigateTo('calendar', () => setDayAgendaOpen(true));
   };
+  const openCancellationLog = () => {
+    navigateTo('settings', () => window.setTimeout(() => document.querySelector('.cancellation-log-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80));
+  };
   const now = clock;
   const todayActionTasks = missionTasks.filter((task) => taskOccursInActionDay(task, localDateKey(now), now));
   const dashboardTasks: DashboardTask[] = missionTasks.map((task) => ({
@@ -1939,6 +1961,7 @@ export default function Home() {
       }}
       onNavigate={(nextView) => navigateTo(nextView)}
       onOpenCalendarDay={openCalendarDay}
+      onOpenCancellationLog={openCancellationLog}
     />}
 
     {view === 'board' && <div className="board-control-rack">
@@ -2067,6 +2090,22 @@ export default function Home() {
             </section>
           </div>
         </section>
+        <section className="settings-panel cancellation-log-panel">
+          <header><span>04</span><div><h3>CANCELLATION LOG</h3><p>首页取消统计的数据来源与手动清理入口</p></div><strong>{taskDeletionEvents.length} EVENTS</strong></header>
+          <div className="cancellation-log-body">
+            <div className="cancellation-log-rule"><span>AUDIT RULE</span><strong>删除普通任务或循环实例时记录；删除循环模板不计入取消。</strong><small>移除留痕只影响统计，不会恢复原任务。</small></div>
+            {visibleCancellationEvents.length ? <div className="cancellation-event-list">{visibleCancellationEvents.map((event, index) => {
+              const missionMoment = event.dueAt || event.startedAt || event.completedAt;
+              return <article key={event.id}>
+                <span>{String(index + 1).padStart(2, '0')}</span>
+                <div><strong>{event.title}</strong><small>{event.taskType} · {statusLabel(event.status)} · 原任务 {missionMoment ? formatTime(missionMoment) : '无日期'}</small></div>
+                <time>{formatTime(event.deletedAt)}<small>DELETED</small></time>
+                <button type="button" onClick={() => void removeCancellationEvent(event.id)} aria-label={`移除 ${event.title} 的取消留痕`}>×<span>REMOVE</span></button>
+              </article>;
+            })}</div> : <div className="cancellation-log-empty"><strong>NO CANCELLATION EVENTS</strong><span>删除任务后，取消留痕会出现在这里。</span></div>}
+            {taskDeletionEvents.length > CANCELLATION_LOG_LIMIT && <button type="button" className="cancellation-log-toggle" aria-expanded={cancellationLogExpanded} onClick={() => setCancellationLogExpanded((current) => !current)}>{cancellationLogExpanded ? '收起记录 ↑' : `显示其余 ${taskDeletionEvents.length - CANCELLATION_LOG_LIMIT} 条 ↓`}</button>}
+          </div>
+        </section>
       </div>
     </section>}
 
@@ -2103,7 +2142,7 @@ export default function Home() {
         {draft.isRecurrenceTemplate && draft.recurrence === 'weekly' && <div className="weekly-picker"><span>REPEAT DAYS / 循环日（可多选）</span><div>{WEEKDAYS.map((day, index) => <button type="button" key={day} className={draft.recurrenceDays.includes(index) ? 'active' : ''} onClick={() => setDraft({ ...draft, recurrenceDays: draft.recurrenceDays.includes(index) ? draft.recurrenceDays.filter((item) => item !== index) : [...draft.recurrenceDays, index].sort() })}>周{day}</button>)}</div></div>}
         {draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 这里保存独立循环模板；修改当天生成的任务不会改变本模板。</p>}
         {!draft.isRecurrenceTemplate && draft.recurrence !== 'none' && <p className="repeat-note"><span>↻</span> 本任务来自循环模板；临时修改时间不会影响循环属性或原始设置，修改标题则会让本次任务脱离循环。</p>}
-      </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={deleteDraft}>{draft.isRecurrenceTemplate ? '删除循环模板' : '删除任务'}</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">{draft.isRecurrenceTemplate ? '保存循环模板' : '保存任务'} <span>→</span></button></footer>
+      </div><footer className="modal-actions">{tasks.some((task) => task.id === draft.id) && <button type="button" className="delete-button" onClick={() => void deleteDraft()}>{draft.isRecurrenceTemplate ? '删除循环模板' : '删除任务'}</button>}<button type="button" className="cancel-button" onClick={() => setDraft(null)}>取消</button><button type="submit" className="save-button">{draft.isRecurrenceTemplate ? '保存循环模板' : '保存任务'} <span>→</span></button></footer>
     </form></div>}
 
     {sleepPickerField && <div className="selector-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSleepPickerField(null); }}><section className="persona-selector time-selector sleep-time-selector" role="dialog" aria-modal="true" aria-label={sleepPickerField === 'sleepStartedAt' ? '设置入睡时间' : '设置醒来时间'}><header><span>NIGHT LOG TIME</span><strong>{sleepPickerField === 'sleepStartedAt' ? 'SET SLEEP START' : 'SET WAKE SIGNAL'}</strong><button type="button" className="selector-close-button" aria-label="关闭睡眠时间窗口" onClick={() => setSleepPickerField(null)}>×</button></header><div className="time-toolbelt"><button onClick={() => { const current = new Date(); setSleepPickerDate(localDateKey(current)); setSleepPickerTime(`${String(current.getHours()).padStart(2, '0')}:${String(current.getMinutes()).padStart(2, '0')}`); }}><strong>NOW</strong><span>设为现在</span></button></div><div className="custom-datetime"><section className="date-board"><header><button type="button" onClick={() => setSleepPickerMonth(new Date(sleepPickerMonth.getFullYear(), sleepPickerMonth.getMonth() - 1, 1))}>‹</button><strong>{sleepPickerMonth.getFullYear()} / {String(sleepPickerMonth.getMonth() + 1).padStart(2, '0')}</strong><button type="button" onClick={() => setSleepPickerMonth(new Date(sleepPickerMonth.getFullYear(), sleepPickerMonth.getMonth() + 1, 1))}>›</button></header><div className="picker-weekdays">{WEEKDAYS.map((day) => <span key={day}>{day}</span>)}</div><div className="picker-days">{sleepPickerCalendarDays.map((day) => { const key = localDateKey(day); return <button type="button" key={key} className={`${day.getMonth() !== sleepPickerMonth.getMonth() ? 'outside' : ''} ${sleepPickerDate === key ? 'active' : ''} ${key === localDateKey(new Date()) ? 'today' : ''}`} onClick={() => { setSleepPickerDate(key); setSleepPickerMonth(new Date(day.getFullYear(), day.getMonth(), 1)); }}>{day.getDate()}</button>; })}</div></section><section className="time-board"><span>SELECT TIME / 选择时间</span><label className="manual-time-input"><span>MANUAL INPUT / 手动输入</span><input type="time" step="60" value={sleepPickerTime} onChange={(event) => setSleepPickerTime(event.target.value)} aria-label="手动输入睡眠时间" /></label><strong>{String(sleepPickerHour).padStart(2, '0')}<i>:</i>{String(sleepPickerMinute).padStart(2, '0')}</strong><label>HOUR / 小时</label><div className="hour-grid">{Array.from({ length: 24 }, (_, hour) => <button type="button" key={hour} className={sleepPickerHour === hour ? 'active' : ''} onClick={() => setSleepPickerTime(`${String(hour).padStart(2, '0')}:${String(sleepPickerMinute).padStart(2, '0')}`)}>{String(hour).padStart(2, '0')}</button>)}</div><label>MINUTE / 分钟</label><div className="minute-grid">{[0, 15, 30, 45, 59].map((minute) => <button type="button" key={minute} className={sleepPickerMinute === minute ? 'active' : ''} onClick={() => setSleepPickerTime(`${String(sleepPickerHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)}>{String(minute).padStart(2, '0')}</button>)}</div></section></div><button type="button" className="time-confirm" onClick={applySleepPicker}>CONFIRM · {sleepPickerDate.replaceAll('-', ' / ')} · {sleepPickerTime} <span>→</span></button></section></div>}

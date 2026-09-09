@@ -41,6 +41,7 @@ type LifeDashboardProps = {
   onCampaignWindowChange: (scale: DashboardCampaignScale, periodId: string) => void;
   onNavigate: (view: 'board' | 'table' | 'calendar' | 'sleep') => void;
   onOpenCalendarDay: (dayKey: string) => void;
+  onOpenCancellationLog: () => void;
 };
 
 type CampaignPeriod = {
@@ -467,7 +468,7 @@ function MetricTrend({ title, values, tone, onPointSelect }: { title: string; va
   </div>;
 }
 
-export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, taskDeletionEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate, onOpenCalendarDay }: LifeDashboardProps) {
+export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEvents, taskDeletionEvents, campaignScale: scale, selectedPeriodId, onCampaignWindowChange, onNavigate, onOpenCalendarDay, onOpenCancellationLog }: LifeDashboardProps) {
   const [typeRankMode, setTypeRankMode] = useState<TypeRankMode>('total');
   const [loadMode, setLoadMode] = useState<LoadMode>('factions');
   const [factionTimeMode, setFactionTimeMode] = useState<FactionTimeMode>(() => {
@@ -523,7 +524,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     { id: 'learning', code: 'STUDY / WEEK', label: '平均周学习时长', value: formatDuration(metrics.learningWeeklyMinutes), unit: '', note: `按 ${metrics.equivalentWeeks.toFixed(1)} 周折算`, tone: 'purple' },
     { id: 'fitness', code: 'FITNESS / WEEK', label: '平均周健身次数', value: formatWeeklyCount(metrics.fitnessWeeklyCount), unit: '次', note: '仅计已完成运动任务', tone: 'yellow' },
     { id: 'meditation', code: 'MEDITATE / WEEK', label: '平均周冥想次数', value: formatWeeklyCount(metrics.meditationWeeklyCount), unit: '次', note: '仅计已完成冥想任务', tone: 'blue' },
-    { id: 'cancelled', code: 'CANCEL RATE', label: '任务取消率', value: metrics.cancellationRate.toFixed(1), unit: '%', note: `${metrics.cancellationCount} 取消 · 升级后记录`, tone: 'red' },
+    { id: 'cancelled', code: 'CANCEL RATE', label: '任务取消率', value: metrics.cancellationRate.toFixed(1), unit: '%', note: metrics.cancellationCount ? `${metrics.cancellationCount} 次取消留痕` : '暂无取消留痕', tone: 'red' },
   ];
   const overviewCalendarData = (() => {
     if (!overviewDrilldown) return null;
@@ -536,7 +537,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       learning: { index: 'V05', title: 'STUDY / WEEK', metricLabel: 'AVERAGE WEEKLY STUDY TIME', formula: `DAILY TRACKED TIME FOR 学业/学习/复习/考试/阅读/证书/课程 · PERIOD TOTAL ÷ ${metrics.equivalentWeeks.toFixed(1)} WEEKS`, accent: 'purple', trendTitle: 'DAILY STUDY TIME' },
       fitness: { index: 'V06', title: 'FITNESS / WEEK', metricLabel: 'AVERAGE WEEKLY FITNESS', formula: 'CHECK = ONE OR MORE FITNESS MISSIONS COMPLETED ON THAT LOCAL DATE', accent: 'yellow' },
       meditation: { index: 'V07', title: 'MEDITATE / WEEK', metricLabel: 'AVERAGE WEEKLY MEDITATION', formula: 'CHECK = ONE OR MORE MEDITATION MISSIONS COMPLETED ON THAT LOCAL DATE', accent: 'blue' },
-      cancelled: { index: 'V08', title: 'CANCELLATION RATE', metricLabel: 'TASK CANCELLATION RATE', formula: 'DAILY CANCELLATION COUNT · ZERO STAYS BLANK · AUDIT STARTS WITH THIS UPGRADE', accent: 'orange' },
+      cancelled: { index: 'V08', title: 'CANCELLATION RATE', metricLabel: 'TASK CANCELLATION RATE', formula: 'CANCELLED TASKS ÷ CURRENT MISSIONS AND CANCELLATION LOGS · ZERO STAYS BLANK', accent: 'orange' },
     };
     const selectedConfig = config[overviewDrilldown];
     const buildDayRecord = (sourceDate: Date, selected: boolean, panelMonth: number) => {
@@ -599,6 +600,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       return {
         date: start,
         numericValue,
+        trendValue: overviewDrilldown === 'busy' && !hasWakeRecord ? null : numericValue,
         day: { id: dayPeriod.id, day: start.getDate(), dateLabel: dayPeriod.compactLabel, future, selected, outsideMonth: start.getMonth() !== panelMonth, value, unit, marker, markerCount, detail, intensity: 0 },
       };
     };
@@ -635,7 +637,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     });
     const trend = selectedConfig.trendTitle ? {
       title: selectedConfig.trendTitle,
-      values: dailyRecords.map((record) => ({ id: record.day.id, label: record.day.dateLabel, value: record.numericValue, displayValue: record.day.value ? `${record.day.value}${record.day.unit}` : '—' })),
+      values: dailyRecords.map((record) => ({ id: record.day.id, label: record.day.dateLabel, value: record.trendValue, displayValue: record.day.value ? `${record.day.value}${record.day.unit}` : '—' })),
     } : undefined;
     return {
       index: selectedConfig.index,
@@ -643,6 +645,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       periodLabel: period.label,
       metric: `${stat.value}${stat.unit}`,
       metricLabel: selectedConfig.metricLabel,
+      dayActionLabel: overviewDrilldown === 'cancelled' ? '打开取消留痕' : '打开当天详情',
       formula: selectedConfig.formula,
       accent: selectedConfig.accent,
       scale,
@@ -964,7 +967,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
         <button type="button" onClick={() => onNavigate('calendar')}><span>04</span><div><strong>CALENDAR</strong><small>进入月度行动地图</small></div><i>◆</i></button>
       </nav>
     </div>
-    {overviewCalendarData && <DashboardCalendarDrilldown data={overviewCalendarData} onClose={() => setOverviewDrilldown(null)} onDaySelect={(dayKey) => { setOverviewDrilldown(null); onOpenCalendarDay(dayKey); }} />}
+    {overviewCalendarData && <DashboardCalendarDrilldown data={overviewCalendarData} onClose={() => setOverviewDrilldown(null)} onDaySelect={(dayKey) => { setOverviewDrilldown(null); if (overviewDrilldown === 'cancelled') onOpenCancellationLog(); else onOpenCalendarDay(dayKey); }} />}
     {drilldown && <DashboardDrilldown data={drilldown} onClose={() => setDrilldown(null)} />}
   </section>;
 }

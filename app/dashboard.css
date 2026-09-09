@@ -628,14 +628,25 @@ body:has(.dashboard-calendar-backdrop) .menu-trigger { visibility: hidden; point
 .overview-calendar-archive > header span { color: var(--calendar-accent); font-size: .62rem; font-weight: 1000; letter-spacing: .1em; }
 .overview-daily-trend > header strong,
 .overview-calendar-archive > header strong { font-size: .68rem; letter-spacing: .05em; }
-.overview-daily-trend > div { padding: 8px 12px 7px; background: color-mix(in srgb, var(--calendar-accent) 8%, var(--color-paper)); }
+.overview-daily-trend > div { position: relative; padding: 8px 12px 7px; background: color-mix(in srgb, var(--calendar-accent) 8%, var(--color-paper)); }
 .overview-daily-trend svg { display: block; width: 100%; height: 136px; overflow: visible; }
 .overview-daily-trend .trend-grid { fill: none; stroke: rgb(17 18 15 / 14%); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .overview-daily-trend .trend-keyline,
-.overview-daily-trend .trend-signal { fill: none; stroke-linecap: square; stroke-linejoin: bevel; vector-effect: non-scaling-stroke; }
+.overview-daily-trend .trend-signal { fill: none; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .overview-daily-trend .trend-keyline { stroke: var(--color-ink); stroke-width: 8; }
 .overview-daily-trend .trend-signal { stroke: var(--calendar-accent); stroke-width: 4; }
-.overview-daily-trend circle { fill: var(--color-paper); stroke: var(--color-ink); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.overview-daily-trend .trend-point-group { cursor: crosshair; outline: none; }
+.overview-daily-trend .trend-point-hit { fill: transparent; stroke: none; pointer-events: all; }
+.overview-daily-trend .trend-point { fill: var(--color-paper); stroke: var(--color-ink); stroke-width: 3; opacity: 0; pointer-events: none; transform-box: fill-box; transform-origin: center; transition: opacity 120ms ease, transform 120ms var(--ease-snap), fill 120ms ease; vector-effect: non-scaling-stroke; }
+.overview-daily-trend .trend-point.is-visible { opacity: 1; }
+.overview-daily-trend .trend-point-group:hover .trend-point,
+.overview-daily-trend .trend-point-group:focus .trend-point,
+.overview-daily-trend .trend-point-group.is-active .trend-point { fill: var(--calendar-accent); opacity: 1; transform: scale(1.75); }
+.trend-link-tooltip { position: absolute; z-index: 6; min-width: 92px; padding: 6px 8px; color: var(--color-paper); background: var(--color-ink); border: 2px solid var(--color-paper); outline: 2px solid var(--color-ink); box-shadow: 4px 5px 0 var(--calendar-accent); pointer-events: none; transform: translate(-50%, calc(-100% - 12px)) rotate(-1deg); }
+.trend-link-tooltip span,
+.trend-link-tooltip strong { display: block; white-space: nowrap; }
+.trend-link-tooltip span { color: var(--calendar-accent); font-size: .5rem; font-weight: 1000; letter-spacing: .08em; }
+.trend-link-tooltip strong { margin-top: 3px; font: italic 1000 .82rem/1 var(--font-display); }
 .overview-daily-trend footer { display: flex; justify-content: space-between; color: #66665c; font-size: .6rem; font-weight: 1000; }
 .overview-daily-trend footer strong { color: var(--calendar-accent); letter-spacing: .08em; }
 .overview-calendar-archive { background: var(--color-ink); }
@@ -665,6 +676,7 @@ body:has(.dashboard-calendar-backdrop) .menu-trigger { visibility: hidden; point
 .overview-calendar-grid .overview-calendar-day.is-future:not(.is-selected) { opacity: .36; }
 .overview-calendar-grid .overview-calendar-day:hover,
 .overview-calendar-grid .overview-calendar-day:focus-visible { z-index: 3; outline: 3px solid var(--color-ink); outline-offset: -3px; filter: none; opacity: 1; transform: translateY(-3px) rotate(-1deg); box-shadow: 4px 5px 0 var(--calendar-accent); }
+.overview-calendar-grid .overview-calendar-day.is-linked { z-index: 4; outline: 3px solid var(--color-ink); outline-offset: -3px; filter: none; opacity: 1; transform: translateY(-3px) rotate(-1deg); box-shadow: inset 0 0 0 4px var(--calendar-accent), 4px 5px 0 var(--calendar-accent); }
 .overview-calendar-grid time { justify-self: start; color: #55564e; font-size: .58rem; font-weight: 1000; }
 .overview-calendar-grid .overview-calendar-day.is-selected time { color: var(--color-ink); }
 .overview-calendar-grid .overview-calendar-day > strong { align-self: center; justify-self: center; max-width: 100%; font: italic 1000 clamp(.9rem, 1.55vw, 1.45rem)/.9 var(--font-display); letter-spacing: -.05em; white-space: nowrap; }
@@ -890,7 +902,11 @@ body:has(.dashboard-calendar-backdrop) .menu-trigger { visibility: hidden; point
 .view-dashboard.theme-night .overview-daily-trend > div { background: color-mix(in srgb, var(--calendar-accent) 12%, var(--dashboard-night-raised)); }
 .view-dashboard.theme-night .overview-daily-trend .trend-grid { stroke: rgb(242 238 214 / 14%); }
 .view-dashboard.theme-night .overview-daily-trend .trend-keyline { stroke: var(--dashboard-night-text); }
-.view-dashboard.theme-night .overview-daily-trend circle { fill: var(--dashboard-night-raised); stroke: var(--dashboard-night-text); }
+.view-dashboard.theme-night .overview-daily-trend .trend-point { fill: var(--dashboard-night-raised); stroke: var(--dashboard-night-text); }
+.view-dashboard.theme-night .overview-daily-trend .trend-point-group:hover .trend-point,
+.view-dashboard.theme-night .overview-daily-trend .trend-point-group:focus .trend-point,
+.view-dashboard.theme-night .overview-daily-trend .trend-point-group.is-active .trend-point { fill: var(--calendar-accent); }
+.view-dashboard.theme-night .trend-link-tooltip { color: var(--dashboard-night-text); background: #050604; border-color: var(--dashboard-night-text); outline-color: #050604; }
 .view-dashboard.theme-night .overview-daily-trend footer,
 .view-dashboard.theme-night .overview-calendar-grid time { color: var(--dashboard-night-muted); }
 .view-dashboard.theme-night .overview-weekday-row { color: var(--dashboard-night-text); background: #292a24; border-color: #050604; }
@@ -901,6 +917,7 @@ body:has(.dashboard-calendar-backdrop) .menu-trigger { visibility: hidden; point
 .view-dashboard.theme-night .overview-calendar-grid .overview-calendar-day.is-selected time { color: var(--dashboard-night-text); }
 .view-dashboard.theme-night .overview-calendar-grid .overview-calendar-day:hover,
 .view-dashboard.theme-night .overview-calendar-grid .overview-calendar-day:focus-visible { outline-color: var(--dashboard-night-text); }
+.view-dashboard.theme-night .overview-calendar-grid .overview-calendar-day.is-linked { outline-color: var(--dashboard-night-text); }
 .view-dashboard.theme-night .overview-calendar-grid .overview-calendar-day > em { color: #090a07; background: var(--dashboard-night-text); }
 .view-dashboard.theme-night .calendar-pin i { border-color: #050604; box-shadow: 3px 3px 0 #050604; }
 .view-dashboard.theme-night .calendar-pin b { background: var(--dashboard-night-text); }
