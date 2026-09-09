@@ -12,6 +12,7 @@ export type DashboardCampaignScale = 'week' | 'month' | 'quarter';
 type TypeRankMode = 'total' | 'average';
 type LoadMode = 'factions' | 'priority';
 type FactionTimeMode = 'merged' | 'stacked';
+type GraceMinutes = 0 | 30 | 60;
 
 export type DashboardTask = {
   id: string;
@@ -55,10 +56,10 @@ type Allocation = {
 
 const DAY_MS = 24 * 60 * 60_000;
 const MINUTE_MS = 60_000;
-const IN_TIME_GRACE_MS = 60 * MINUTE_MS;
 const PIE_RADIUS = 82;
 const PIE_CIRCUMFERENCE = 2 * Math.PI * PIE_RADIUS;
 const FACTION_TIME_MODE_SESSION_KEY = 'sao-dashboard-faction-time-mode-v1';
+const GRACE_SESSION_KEY = 'sao-dashboard-in-time-grace-v1';
 const TONES: DashboardTone[] = ['purple', 'blue', 'green', 'yellow'];
 const PRIORITIES: DashboardPriority[] = ['must', 'high', 'medium', 'low'];
 const TONE_META: Record<DashboardTone, { label: string; signal: string }> = {
@@ -84,6 +85,11 @@ const PRIORITY_DRILLDOWN_TONE: Record<DashboardPriority, DrilldownTone> = {
   medium: 'yellow',
   low: 'muted',
 };
+const GRACE_OPTIONS: { value: GraceMinutes; label: string; detail: string }[] = [
+  { value: 0, label: 'NONE', detail: 'NO GRACE' },
+  { value: 30, label: '30M', detail: '30 MIN' },
+  { value: 60, label: '1H', detail: '1 HOUR' },
+];
 
 function validDate(value: string) {
   if (!value) return null;
@@ -234,18 +240,18 @@ function completionDeadlineDelta(task: DashboardTask) {
   return completedAt && dueAt ? +completedAt - +dueAt : null;
 }
 
-function isInTimeCompletion(task: DashboardTask) {
+function isInTimeCompletion(task: DashboardTask, graceMinutes: GraceMinutes) {
   const delta = completionDeadlineDelta(task);
   if (delta === null) return false;
-  return delta <= (task.tone === 'blue' ? 0 : IN_TIME_GRACE_MS);
+  return delta <= graceMinutes * MINUTE_MS;
 }
 
-function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: DeadlineEvent[], sleepRecords: SleepRecord[], now: Date) {
+function periodMetrics(period: CampaignPeriod, tasks: DashboardTask[], events: DeadlineEvent[], sleepRecords: SleepRecord[], now: Date, graceMinutes: GraceMinutes) {
   const periodTasks = tasks.filter((task) => taskBelongsToPeriod(task, period));
   const mustTasks = periodTasks.filter((task) => task.priority === 'must');
   const clears = tasks.filter((task) => inPeriod(task.completedAt, period));
   const deadlineClears = clears.filter((task) => validDate(task.dueAt));
-  const inTimeCount = deadlineClears.filter(isInTimeCompletion).length;
+  const inTimeCount = deadlineClears.filter((task) => isInTimeCompletion(task, graceMinutes)).length;
   const periodEvents = events.filter((event) => event.priorityAtChange === 'must' && isDeadlineExtension(event) && inPeriod(event.changedAt, period));
   const changedMustIds = new Set(periodEvents.map((event) => event.taskId).filter((id) => mustTasks.some((task) => task.id === id)));
   const trackedTasks = tasks.filter((task) => intervalMinutes(task, period, now) > 0);
@@ -381,9 +387,18 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     return window.sessionStorage.getItem(FACTION_TIME_MODE_SESSION_KEY) === 'stacked' ? 'stacked' : 'merged';
   });
   const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  const [graceMenuOpen, setGraceMenuOpen] = useState(false);
+  const [graceMinutes, setGraceMinutes] = useState<GraceMinutes>(() => {
+    if (typeof window === 'undefined') return 60;
+    const saved = window.sessionStorage.getItem(GRACE_SESSION_KEY);
+    if (saved === '0') return 0;
+    if (saved === '30') return 30;
+    return 60;
+  });
   const [drilldown, setDrilldown] = useState<DashboardDrilldownData | null>(null);
   const [sleepSmaGeometry, setSleepSmaGeometry] = useState<{ sourceKey: string; left: number; top: number; width: number; height: number; points: { id: string; x: number; y: number }[] } | null>(null);
   const periodSelectorRef = useRef<HTMLDivElement>(null);
+  const graceFilterRef = useRef<HTMLDivElement>(null);
   const sleepRhythmRef = useRef<HTMLDivElement>(null);
   const earliest = useMemo(() => {
     const dates = [
@@ -397,9 +412,9 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   const selectedIndex = periods.findIndex((period) => period.id === selectedPeriodId);
   const effectiveIndex = selectedPeriodId && selectedIndex >= 0 ? selectedIndex : periods.length - 1;
   const period = periods[effectiveIndex];
-  const metrics = useMemo(() => periodMetrics(period, tasks, deadlineEvents, sleepRecords, now), [deadlineEvents, now, period, sleepRecords, tasks]);
+  const metrics = useMemo(() => periodMetrics(period, tasks, deadlineEvents, sleepRecords, now, graceMinutes), [deadlineEvents, graceMinutes, now, period, sleepRecords, tasks]);
   const trendPeriods = periods.slice(Math.max(0, effectiveIndex - SCALE_META[scale].trendCount + 1), effectiveIndex + 1);
-  const trendMetrics = trendPeriods.map((item) => ({ period: item, metrics: periodMetrics(item, tasks, deadlineEvents, sleepRecords, now) }));
+  const trendMetrics = trendPeriods.map((item) => ({ period: item, metrics: periodMetrics(item, tasks, deadlineEvents, sleepRecords, now, graceMinutes) }));
   const loadBuckets = buildLoadBuckets(period, scale, tasks);
   const maxLoad = Math.max(1, ...loadBuckets.map((bucket) => bucket.total));
   const mergedFactionMinutes = useMemo(() => TONES.reduce((values, tone) => ({ ...values, [tone]: mergedToneMinutes(tasks, tone, period, now) }), {} as Record<DashboardTone, number>), [now, period, tasks]);
@@ -409,6 +424,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   const maxTypeMetric = Math.max(1, ...rankedTypes.map((type) => typeRankMode === 'total' ? type.minutes : type.average));
   const periodDays = Math.round((+period.end - +period.start) / DAY_MS);
   const rollingWindowLabel = scale === 'week' ? 'ROLLING 12 WEEKS' : scale === 'month' ? 'ROLLING 12 MONTHS' : 'ROLLING 4 QUARTERS';
+  const graceLabel = GRACE_OPTIONS.find((option) => option.value === graceMinutes)?.label ?? '1H';
   const sleepRhythm = useMemo(() => {
     const durationFor = (record: SleepRecord) => Math.max(0, +new Date(record.wakeAt) - +new Date(record.sleepStartedAt)) / MINUTE_MS;
     const dailyDurations = new Map<string, number[]>();
@@ -458,12 +474,12 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   });
   const openInTimeDrilldown = (targetPeriod: CampaignPeriod) => {
     const deadlineClears = tasks.filter((task) => inPeriod(task.completedAt, targetPeriod) && validDate(task.dueAt));
-    const inTime = deadlineClears.filter(isInTimeCompletion);
-    const late = deadlineClears.filter((task) => !isInTimeCompletion(task));
-    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now);
+    const inTime = deadlineClears.filter((task) => isInTimeCompletion(task, graceMinutes));
+    const late = deadlineClears.filter((task) => !isInTimeCompletion(task, graceMinutes));
+    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now, graceMinutes);
     const deadlineItem = (task: DashboardTask) => {
       const delta = completionDeadlineDelta(task) ?? 0;
-      const isInTime = isInTimeCompletion(task);
+      const isInTime = isInTimeCompletion(task, graceMinutes);
       const outcome = delta <= 0 ? 'EARLY' : isInTime ? 'GRACE' : 'LATE';
       return makeTaskItem(task, `${formatDuration(Math.abs(delta) / MINUTE_MS)} ${outcome}`, `完成 ${formatMoment(task.completedAt)} · 最终截止 ${formatMoment(task.dueAt)}`, isInTime ? outcome === 'GRACE' ? 'blue' : 'green' : 'red');
     };
@@ -472,8 +488,8 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
       title: 'IN-TIME VERDICT',
       periodLabel: targetPeriod.label,
       metric: targetMetrics.inTimeRate === null ? '--' : `${targetMetrics.inTimeRate.toFixed(1)}%`,
-      metricLabel: 'FINAL DEADLINE RATE',
-      formula: `${targetMetrics.inTimeCount} IN TIME ÷ ${targetMetrics.inTimeSample} DEADLINE CLEARS`,
+      metricLabel: `FINAL DEADLINE RATE · ${graceLabel} GRACE`,
+      formula: `${targetMetrics.inTimeCount} IN TIME ÷ ${targetMetrics.inTimeSample} DEADLINE CLEARS · GRACE ${graceLabel}`,
       accent: 'yellow',
       groups: [
         { id: 'in-time', label: 'IN TIME / 准时完成', countLabel: `${inTime.length} MISSIONS`, items: inTime.map(deadlineItem) },
@@ -488,7 +504,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     periodEvents.forEach((event) => eventsByTask.set(event.taskId, [...(eventsByTask.get(event.taskId) ?? []), event]));
     const changed = mustTasks.filter((task) => eventsByTask.has(task.id));
     const unchanged = mustTasks.filter((task) => !eventsByTask.has(task.id));
-    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now);
+    const targetMetrics = periodMetrics(targetPeriod, tasks, deadlineEvents, sleepRecords, now, graceMinutes);
     const changedItem = (task: DashboardTask) => {
       const events = eventsByTask.get(task.id) ?? [];
       const history = events.sort((a, b) => +new Date(a.changedAt) - +new Date(b.changedAt)).map((event) => `${formatMoment(event.changedAt)}｜${formatMoment(event.oldDueAt)} → ${formatMoment(event.newDueAt)}`).join(' · ');
@@ -553,6 +569,10 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
   }, [factionTimeMode]);
 
   useEffect(() => {
+    window.sessionStorage.setItem(GRACE_SESSION_KEY, String(graceMinutes));
+  }, [graceMinutes]);
+
+  useEffect(() => {
     const strip = sleepRhythmRef.current;
     if (!strip || !sleepRhythm.length) {
       setSleepSmaGeometry(null);
@@ -610,6 +630,22 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
     };
   }, [periodMenuOpen]);
 
+  useEffect(() => {
+    if (!graceMenuOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!graceFilterRef.current?.contains(event.target as Node)) setGraceMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setGraceMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [graceMenuOpen]);
+
   return <section className="life-dashboard" aria-label="长期生活战绩 Dashboard">
     <header className="campaign-header">
       <div className="campaign-title"><span>00 / LIFE PERFORMANCE ARCHIVE</span><h2>CAMPAIGN<br /><em>RECORD</em></h2><p><strong>{username}</strong><span aria-hidden="true">·</span><span className="campaign-brand-status">Sword Art Online <i aria-label="社交链路在线"><span className="campaign-online-mark" aria-hidden="true"><b /><b /><b /><em /></span><span className="campaign-online-copy" aria-hidden="true"><small>SOCIAL LINK</small><b>ONLINE</b></span><u aria-hidden="true">{'///'}</u></i></span></p></div>
@@ -623,7 +659,7 @@ export function LifeDashboard({ username, now, tasks, sleepRecords, deadlineEven
 
     <section className="discipline-arena">
       <article className="discipline-kpi in-time-kpi">
-        <header><span>01 / FINAL DEADLINE</span><strong>IN-TIME RATE</strong><small>准时完成率</small></header>
+        <header><span>01 / FINAL DEADLINE</span><strong>IN-TIME RATE</strong><div className="in-time-header-tools"><div className={`grace-filter${graceMenuOpen ? ' is-open' : ''}`} ref={graceFilterRef}><button type="button" className="grace-filter-trigger" aria-haspopup="menu" aria-expanded={graceMenuOpen} onClick={() => setGraceMenuOpen((open) => !open)}><span>GRACE</span><strong>{graceLabel}</strong><i>⌄</i></button>{graceMenuOpen && <div className="grace-filter-menu" role="menu" aria-label="准时完成宽限规则"><span>DEADLINE BUFFER</span>{GRACE_OPTIONS.map((option, index) => <button key={option.value} type="button" role="menuitemradio" aria-checked={graceMinutes === option.value} className={graceMinutes === option.value ? 'active' : ''} onClick={() => { setGraceMinutes(option.value); setGraceMenuOpen(false); }}><i>{String(index + 1).padStart(2, '0')}</i><strong>{option.detail}</strong><b>{graceMinutes === option.value ? '◆' : '◇'}</b></button>)}</div>}</div><small>准时完成率</small></div></header>
         <div className="kpi-snapshot is-actionable" role="button" tabIndex={0} aria-label="查看本周期准时完成率明细" onClick={() => openInTimeDrilldown(period)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openInTimeDrilldown(period); } }}><strong>{metrics.inTimeRate === null ? '--' : metrics.inTimeRate.toFixed(1)}<i>{metrics.inTimeRate === null ? '' : '%'}</i></strong><p>{metrics.inTimeCount} IN TIME / {metrics.inTimeSample} DEADLINE CLEARS</p><small className="drilldown-callout">OPEN VERDICT ▶</small></div>
         <MetricTrend title={`IN-TIME · ${rollingWindowLabel}`} tone="yellow" values={trendMetrics.map((item) => ({ label: item.period.compactLabel, value: item.metrics.inTimeRate, period: item.period }))} onPointSelect={openInTimeDrilldown} />
       </article>
