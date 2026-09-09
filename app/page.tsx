@@ -1049,8 +1049,7 @@ function RichTextDescription({ value, onChange }: { value: string; onChange: (va
     const nextItem = createChecklistItem();
     const nextEntry = Array.from(nextItem.children).find((child): child is HTMLSpanElement => child instanceof HTMLSpanElement && child.classList.contains('checklist-entry'));
     if (nextEntry && trailingContents.childNodes.length) {
-      nextEntry.textContent = '';
-      nextEntry.append(trailingContents);
+      nextEntry.replaceChildren(trailingContents);
     }
     item.insertAdjacentElement('afterend', nextItem);
     placeCaretAtChecklistTextStart(nextItem);
