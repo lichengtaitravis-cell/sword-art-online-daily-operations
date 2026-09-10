@@ -4,12 +4,13 @@ import './dashboard.css';
 import './brand.css';
 
 export const metadata: Metadata = {
-  title: 'Sword Art Online — Life Command',
+  title: 'Sword Art Online',
   description: 'A local-first life command dashboard for missions, time, routines, and daily progress.',
+  manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/sao-tv-icon-v2.png',
-    shortcut: '/sao-tv-icon-v2.png',
-    apple: '/sao-tv-icon-v2.png',
+    icon: '/sao-tv-icon-v4-512.png',
+    shortcut: '/sao-tv-icon-v4-192.png',
+    apple: '/sao-tv-icon-v4-512.png',
   },
 };
 

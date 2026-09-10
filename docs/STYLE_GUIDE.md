@@ -99,7 +99,7 @@ Rules:
 
 ### Browser identity icon
 
-- The canonical bookmark/favicon artwork is `app/icon.png`, with the cache-busted browser asset at `public/sao-tv-icon-v2.png`: a yellow field carrying one black retro CRT television silhouette.
+- The canonical bookmark/favicon artwork is `app/icon.png`, with cache-busted browser assets at `public/sao-tv-icon-v4-192.png` and `public/sao-tv-icon-v4-512.png`: a full-bleed yellow field carrying one black retro CRT television silhouette with a generous outer safe area. The web app manifest marks both assets as maskable so installed-app chrome does not add a white framing tile.
 - Preserve the TV body, antennas, controls, and screen as one readable mark with generous outer safe space. It must remain identifiable at 16 × 16 pixels.
 - The icon is separate from the in-page wordmark and must not contain title text, characters, rainbow stripes, or official Persona assets.
 
