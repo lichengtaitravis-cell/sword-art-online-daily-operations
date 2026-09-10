@@ -924,6 +924,26 @@ body:has(.dashboard-calendar-backdrop) .menu-trigger { visibility: hidden; point
 .view-dashboard.theme-night .calendar-check,
 .view-dashboard.theme-night .calendar-cancel { -webkit-text-stroke-color: #050604; }
 
+/* Keep the dashboard's half-window typography when the browser itself is very wide. */
+@media (min-width: 1600px) {
+  .view-dashboard .campaign-title h2 { font-size: 4.4rem; }
+  .view-dashboard .campaign-scale button strong { font-size: 1rem; }
+  .view-dashboard .campaign-scale-quarter strong { font-size: .66rem !important; }
+  .view-dashboard .campaign-overview::after { font-size: 4rem; }
+  .view-dashboard .campaign-overview > header h3 { font-size: 1.9rem; }
+  .view-dashboard .overview-stat > strong { font-size: 2.4rem; }
+  .view-dashboard .kpi-snapshot > strong { font-size: 3.45rem; }
+  .view-dashboard .dashboard-story-grid > section > header h3 { font-size: 1.36rem; }
+  .view-dashboard .allocation-panel > header h3 { font-size: 1.12rem; }
+  .view-dashboard .recovery-score strong { font-size: 1.6rem; }
+  .view-dashboard .dashboard-drilldown > header h2,
+  .view-dashboard .dashboard-calendar-drilldown > header h2 { font-size: 3.2rem; }
+  .view-dashboard .drilldown-metric strong,
+  .view-dashboard .calendar-headline strong { font-size: 2.8rem; }
+  .view-dashboard .overview-calendar-grid .overview-calendar-day > strong { font-size: 1.24rem; }
+  .view-dashboard .calendar-scale-quarter .overview-calendar-grid .overview-calendar-day > strong { font-size: .66rem; }
+}
+
 @media (max-width: 1120px) {
   .campaign-header { grid-template-columns: 1fr 1fr; }
   .period-selector { grid-column: 1 / 3; min-height: 104px; padding: 17px 35px; clip-path: polygon(2% 0, 100% 0, 98% 100%, 0 100%); }

@@ -9,6 +9,7 @@ button { color:inherit; }
 
 .app-shell { min-height:100vh; position:relative; overflow:hidden; padding:22px clamp(18px,3vw,48px) 18px clamp(80px,7vw,108px); background:linear-gradient(112deg,transparent 0 69%,rgba(255,255,255,.32) 69.1% 70%,transparent 70.1%),repeating-linear-gradient(-9deg,rgba(17,17,17,.035) 0 1px,transparent 1px 7px),var(--yellow); }
 .app-shell::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(circle at 12% 12%,rgba(255,255,255,.5),transparent 23%),radial-gradient(circle at 78% 18%,transparent 0 14%,rgba(17,17,17,.045) 14.3% 14.8%,transparent 15%); }
+.app-frame { position:relative; width:100%; max-width:1050px; margin-inline:auto; }
 .boot-screen { display:grid; place-items:center; }
 .boot-prime { min-height:100vh; }
 .boot-mark { width:min(480px,80vw); transform:rotate(-2deg); }

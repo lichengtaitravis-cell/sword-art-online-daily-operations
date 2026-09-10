@@ -1939,6 +1939,7 @@ export default function Home() {
     </aside>
     {(menuOpen || menuClosing) && <button className={`menu-scrim ${menuClosing ? 'is-closing' : ''}`} aria-label="关闭菜单" onClick={closeMenu} />}
 
+    <div className="app-frame">
     <header className="hero">
       <BrandLockup sectionTitle={activeNav.title} sectionSubtitle={activeNav.subtitle} username={settings.username} />
       <div className="day-card" aria-label="今日日期"><span>{new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(now).toUpperCase()}</span><strong>{String(now.getDate()).padStart(2, '0')}</strong><em>{new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(now).toUpperCase()}</em></div>
@@ -2110,6 +2111,7 @@ export default function Home() {
     </section>}
 
     <footer className="app-footer"><span>{activeNav.title}</span><i /><span>自动时间戳已开启</span><i /><span>本机自动保存</span></footer>
+    </div>
 
     {impact && <div className={`impact-feedback impact-${impact.tier ?? 'action'}`}><div className="impact-rays" /><span>{impact.title}</span><strong>{impact.subtitle}</strong></div>}
 
